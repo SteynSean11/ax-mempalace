@@ -162,6 +162,10 @@ def _try_normalize_json(content: str) -> Optional[str]:
     if normalized:
         return normalized
 
+    normalized = _try_hermes_jsonl(content)
+    if normalized:
+        return normalized
+
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
@@ -349,6 +353,67 @@ def _try_gemini_jsonl(content: str) -> Optional[str]:
             messages.append(("assistant", joined))
 
     if len(messages) >= 2 and has_session_metadata:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_hermes_jsonl(content: str) -> Optional[str]:
+    """Hermes Agent session JSONL: {"role": "user"|"assistant", "content": str|list, ...}.
+
+    Hermes JSONL uses a flat per-turn schema with ``role`` and ``content`` fields.
+    Content may be:
+      - A plain string (most common for text responses)
+      - A list of content blocks (tool_use / tool_result blocks, similar to Claude Code)
+
+    Tool-result blocks are appended to the previous assistant message, matching
+    the Claude Code JSONL behaviour.  This allows Hermes tool conversations to
+    be mined as exchange pairs.
+
+    Detection: lines that are JSON objects with exactly ``role`` + ``content``
+    keys (or those two keys plus optional extras like ``timestamp``, ``tools``,
+    ``model``).  A line that has ``type`` field is NOT Hermes — that is Claude Code
+    or Codex JSONL.
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    if not lines:
+        return None
+
+    messages: list = []
+
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        # Reject Claude Code / Codex JSONL (they use a "type" top-level key)
+        if "type" in entry:
+            return None
+
+        # Must have role and content to be a Hermes turn
+        role = entry.get("role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        raw_content = entry.get("content", "")
+        text = _extract_content(raw_content)
+        if not text:
+            continue
+
+        if role == "user":
+            messages.append(("user", text))
+        else:  # assistant
+            # If previous message is also assistant (multi-turn tool loop),
+            # merge into the same assistant turn
+            if messages and messages[-1][0] == "assistant":
+                prev_role, prev_text = messages[-1]
+                messages[-1] = (prev_role, prev_text + "\n" + text)
+            else:
+                messages.append(("assistant", text))
+
+    if len(messages) >= 2:
         return _messages_to_transcript(messages)
     return None
 

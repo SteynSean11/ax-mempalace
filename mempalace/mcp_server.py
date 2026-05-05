@@ -57,15 +57,28 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from chromadb.errors import NotFoundError as _ChromaNotFoundError  # noqa: E402
+# chromadb is only needed for the legacy ChromaBackend (not used with pgvector)
+try:
+    from chromadb.errors import NotFoundError as _ChromaNotFoundError  # noqa: E402
+except ImportError:
+    _ChromaNotFoundError = type("ChromaNotFoundError", (Exception,), {})
 
-from .backends.chroma import (  # noqa: E402
-    ChromaBackend,
-    ChromaCollection,
-    _HNSW_BLOAT_GUARD,
-    _pin_hnsw_threads,
-    hnsw_capacity_status,
-)
+try:
+    from .backends.chroma import (  # noqa: E402
+        ChromaBackend,
+        ChromaCollection,
+        _HNSW_BLOAT_GUARD,
+        _pin_hnsw_threads,
+        hnsw_capacity_status,
+    )
+except ImportError:
+    ChromaBackend = None
+    ChromaCollection = None
+    _HNSW_BLOAT_GUARD = None
+    _pin_hnsw_threads = None
+    hnsw_capacity_status = None
+
+from .backends.pgvector import PgVectorBackend, PgVectorCollection  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -115,6 +128,12 @@ _client_cache = None
 _collection_cache = None
 _palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
 _palace_db_mtime = 0.0  # mtime of chroma.sqlite3 at cache time
+_backend_cache = None  # PgVectorBackend instance when using pgvector backend
+
+# Detect backend type from environment variable.
+# pgvector backend connects to the ApexSigma vault postgres (no local palace needed).
+_BACKEND_TYPE = os.environ.get("MEMPALACE_BACKEND", "").lower()
+_IS_PGVECTOR = _BACKEND_TYPE == "pgvector"
 
 # ── Vector-search disabled flag (#1222) ──────────────────────────────────
 # Set when ``hnsw_capacity_status`` reports a divergence between sqlite
@@ -227,6 +246,9 @@ def _get_client():
 
     Note: FAT/exFAT may return 0 for st_ino — the ``current_inode != 0``
     guard skips reconnect detection on those filesystems (safe fallback).
+
+    For pgvector backend this function returns None; the PgVectorBackend
+    manages its own connection pooling and does not require a file-based client.
     """
     global \
         _client_cache, \
@@ -234,7 +256,15 @@ def _get_client():
         _palace_db_inode, \
         _palace_db_mtime, \
         _metadata_cache, \
-        _metadata_cache_time
+        _metadata_cache_time, \
+        _backend_cache
+
+    # pgvector backend: no ChromaDB client needed
+    if _IS_PGVECTOR:
+        if _backend_cache is None:
+            _backend_cache = PgVectorBackend()
+        return None  # signal to _get_collection that we use _backend_cache
+
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     try:
         st = os.stat(db_path)
@@ -274,8 +304,29 @@ def _get_client():
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, caching the client between calls."""
-    global _collection_cache, _metadata_cache, _metadata_cache_time
+    """Return the collection for the active backend, caching between calls.
+
+    For ChromaDB: returns a ChromaCollection wrapping the ChromaDB collection.
+    For pgvector: returns a PgVectorCollection from the vault postgres.
+    """
+    global _collection_cache, _metadata_cache, _metadata_cache_time, _backend_cache
+
+    # pgvector path — PgVectorBackend manages its own connection/cache
+    if _IS_PGVECTOR:
+        if _backend_cache is None:
+            _backend_cache = PgVectorBackend()
+        from .backends.base import PalaceRef
+
+        # Use palace_path as cache-key disambiguator even though vault has
+        # fixed collection names (mempalace_drawers, mempalace_closets).
+        palace_ref = PalaceRef(id=_config.palace_path or "vault", local_path=_config.palace_path)
+        return _backend_cache.get_collection(
+            palace=palace_ref,
+            collection_name=_config.collection_name,
+            create=False,  # tables already exist in vault
+        )
+
+    # ChromaDB path (existing behaviour)
     try:
         client = _get_client()
         # ChromaDB 1.x persists the EF *identity* (its ``name()``) with the
@@ -1400,10 +1451,12 @@ def tool_memories_filed_away():
 
 
 def tool_reconnect():
-    """Force the MCP server to drop the cached ChromaDB collection and reconnect.
+    """Force the MCP server to drop the cached collection and reconnect.
 
     Use after external scripts or CLI commands modify the palace database
-    directly, which can leave the in-memory HNSW index stale.
+    directly, which can leave the in-memory index stale.
+    For pgvector: drops the cached PgVectorBackend connection.
+    For ChromaDB: drops the ChromaDB client and re-runs the HNSW probe.
     """
     global \
         _client_cache, \
@@ -1411,16 +1464,27 @@ def tool_reconnect():
         _palace_db_inode, \
         _palace_db_mtime, \
         _vector_disabled, \
-        _vector_disabled_reason
-    _client_cache = None
-    _collection_cache = None
-    _palace_db_inode = 0
-    _palace_db_mtime = 0.0
-    # Force probe re-run on next _get_client by clearing the flag now;
-    # _refresh_vector_disabled_flag will re-set it if the divergence
-    # still applies after the reconnect.
-    _vector_disabled = False
-    _vector_disabled_reason = ""
+        _vector_disabled_reason, \
+        _backend_cache
+
+    if _IS_PGVECTOR:
+        # pgvector: close and drop the backend so a fresh connection is made
+        if _backend_cache is not None:
+            try:
+                _backend_cache.close()
+            except Exception:
+                pass
+        _backend_cache = None
+        _collection_cache = None
+    else:
+        # ChromaDB: clear all caches and re-run HNSW probe
+        _client_cache = None
+        _collection_cache = None
+        _palace_db_inode = 0
+        _palace_db_mtime = 0.0
+        _vector_disabled = False
+        _vector_disabled_reason = ""
+
     try:
         col = _get_collection()
         if col is None:
@@ -2012,10 +2076,12 @@ def _restore_stdout():
 def main():
     _restore_stdout()
     logger.info("MemPalace MCP Server starting...")
-    # Pre-flight: probe HNSW capacity before any tool call so the warning
-    # is visible at startup rather than on first use (#1222). Pure
-    # filesystem read; never opens a chromadb client.
-    _refresh_vector_disabled_flag()
+    if not _IS_PGVECTOR:
+        # Pre-flight: probe HNSW capacity before any tool call so the warning
+        # is visible at startup rather than on first use (#1222). Pure
+        # filesystem read; never opens a chromadb client.
+        # Skip for pgvector (no HNSW index in vault postgres).
+        _refresh_vector_disabled_flag()
     while True:
         try:
             line = sys.stdin.readline()

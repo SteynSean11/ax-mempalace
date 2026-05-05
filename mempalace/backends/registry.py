@@ -178,8 +178,11 @@ def resolve_backend_for_palace(
 
 
 def _register_builtins() -> None:
-    """Register chroma as the in-tree default."""
-    from .chroma import ChromaBackend
+    """Register chroma as the in-tree default (if chromadb is available)."""
+    try:
+        from .chroma import ChromaBackend
+    except ImportError:
+        return  # chromadb not installed, skip chroma registration
 
     # Use setdefault semantics so a caller that pre-registered for tests wins.
     if "chroma" not in _registry:

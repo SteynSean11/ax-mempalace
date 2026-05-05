@@ -9,8 +9,6 @@ import hashlib
 import os
 import re
 
-from .backends.chroma import ChromaBackend
-
 SKIP_DIRS = {
     ".git",
     "node_modules",
@@ -37,7 +35,21 @@ SKIP_DIRS = {
     "target",
 }
 
-_DEFAULT_BACKEND = ChromaBackend()
+# chromadb-backed ChromaBackend is optional — only import if chromadb is installed
+try:
+    from .backends.chroma import ChromaBackend
+    _HAS_CHROMADB = True
+except ImportError:
+    ChromaBackend = None
+    _HAS_CHROMADB = False
+
+# pgvector backend is always available when configured via MEMPALACE_BACKEND=pgvector
+try:
+    from .backends.pgvector import PgVectorBackend
+except ImportError:
+    PgVectorBackend = None
+
+from .backends.base import PalaceRef
 
 # Schema version for drawer normalization. Bump when the normalization
 # pipeline changes in a way that existing drawers should be rebuilt to pick up
@@ -50,13 +62,53 @@ _DEFAULT_BACKEND = ChromaBackend()
 NORMALIZE_VERSION = 2
 
 
+def _get_default_backend():
+    """Lazily instantiate the configured backend.
+
+    Priority: MEMPALACE_BACKEND env var > ChromaBackend (default).
+    PgVectorBackend is used when MEMPALACE_BACKEND=pgvector.
+    """
+    backend_name = os.environ.get("MEMPALACE_BACKEND", "").lower()
+    if backend_name == "pgvector":
+        if PgVectorBackend is None:
+            raise RuntimeError(
+                "PgVectorBackend is not installed. "
+                "Install psycopg2-binary to use MEMPALACE_BACKEND=pgvector."
+            )
+        return PgVectorBackend()
+    if not _HAS_CHROMADB:
+        raise RuntimeError(
+            "ChromaDB is required for the default backend but is not installed. "
+            "Use MEMPALACE_BACKEND=pgvector to use the PostgreSQL backend instead."
+        )
+    return ChromaBackend()
+
+
+# Replace module-level _DEFAULT_BACKEND with a lazy accessor
+_DEFAULT_BACKEND = None  # lazily initialized
+
+
 def get_collection(
     palace_path: str,
     collection_name: str = "mempalace_drawers",
     create: bool = True,
 ):
     """Get the palace collection through the backend layer."""
-    return _DEFAULT_BACKEND.get_collection(
+    backend = _get_default_backend()
+    # PgVectorBackend uses PalaceRef (RFC 001 contract); ChromaBackend uses
+    # the legacy positional palace_path arg. Route accordingly.
+    backend_name = os.environ.get("MEMPALACE_BACKEND", "").lower()
+    if backend_name == "pgvector" and PgVectorBackend is not None:
+        palace_ref = PalaceRef(
+            id=palace_path,
+            local_path=palace_path,
+        )
+        return backend.get_collection(
+            palace=palace_ref,
+            collection_name=collection_name,
+            create=create,
+        )
+    return backend.get_collection(
         palace_path,
         collection_name=collection_name,
         create=create,

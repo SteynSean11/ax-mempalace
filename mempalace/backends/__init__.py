@@ -28,7 +28,15 @@ from .base import (
     QueryResult,
     UnsupportedFilterError,
 )
-from .chroma import ChromaBackend, ChromaCollection
+
+# chromadb-backed ChromaBackend is optional — only import if chromadb is installed
+try:
+    from .chroma import ChromaBackend, ChromaCollection
+except ImportError:
+    ChromaBackend = None
+    ChromaCollection = None
+
+from .pgvector import PgVectorBackend, PgVectorCollection
 from .registry import (
     available_backends,
     get_backend,
@@ -52,6 +60,8 @@ __all__ = [
     "HealthStatus",
     "PalaceNotFoundError",
     "PalaceRef",
+    "PgVectorBackend",
+    "PgVectorCollection",
     "QueryResult",
     "UnsupportedFilterError",
     "available_backends",
