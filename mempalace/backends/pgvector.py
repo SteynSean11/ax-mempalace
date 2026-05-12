@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
 import psycopg2
@@ -54,12 +55,39 @@ def _ollama_embed(texts: list[str]) -> list[list[float]]:
 # ── Connection factory ─────────────────────────────────────────────────────────
 
 
+def _load_vault_env_defaults() -> None:
+    """Load ApexSigma vault secrets into process env when unset."""
+    env_path = Path.home() / ".config" / "containers" / "secrets" / "apexsigma-vault.env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:]
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
 def _get_conn() -> psycopg2.extensions.connection:
     """Create a psycopg2 connection to the ApexSigma vault postgres."""
+    _load_vault_env_defaults()
     conn = psycopg2.connect(
         host=os.environ.get("PGHOST", "127.0.0.1"),
         port=os.environ.get("PGPORT", "5432"),
-        database=os.environ.get("PGDATABASE", "omega"),
+        database=os.environ.get(
+            "PGDATABASE", os.environ.get("APEXSIGMA_VAULT_POSTGRES_DB", "omega")
+        ),
         user=os.environ.get(
             "PGUSER", os.environ.get("APEXSIGMA_VAULT_POSTGRES_USER", "omega")
         ),

@@ -94,6 +94,20 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+DEFAULT_BACKEND = "chroma"
+_BACKEND_ALIASES = {
+    "chroma": "chroma",
+    "chromadb": "chroma",
+    "postgres": "pgvector",
+    "postgresql": "pgvector",
+    "pgvector": "pgvector",
+}
+
+
+def normalize_backend_name(value: str | None) -> str:
+    """Normalize backend aliases to the canonical backend registry keys."""
+    normalized = str(value or "").strip().lower()
+    return _BACKEND_ALIASES.get(normalized, normalized or DEFAULT_BACKEND)
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -172,6 +186,14 @@ class MempalaceConfig:
                     self._file_config = json.load(f)
             except (json.JSONDecodeError, OSError):
                 self._file_config = {}
+
+    @property
+    def backend(self):
+        """Canonical storage backend name."""
+        env_val = os.environ.get("MEMPALACE_BACKEND") or os.environ.get("MEMPAL_BACKEND")
+        if env_val:
+            return normalize_backend_name(env_val)
+        return normalize_backend_name(self._file_config.get("backend", DEFAULT_BACKEND))
 
     @property
     def palace_path(self):
@@ -320,6 +342,7 @@ class MempalaceConfig:
             pass  # Windows doesn't support Unix permissions
         if not self._config_file.exists():
             default_config = {
+                "backend": DEFAULT_BACKEND,
                 "palace_path": DEFAULT_PALACE_PATH,
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,

@@ -31,7 +31,7 @@ The v4 alpha introduces three major capabilities: pluggable storage backends, lo
 ChromaDB remains the default, but v4 introduces a backend abstraction (shipped in #413) that enables drop-in replacements:
 
 - **PostgreSQL backend** with pg_sorted_heap support (#665) — for production deployments needing ACID guarantees, concurrent access, and standard backup/restore
-- **LanceDB backend** (#574) — for local-first deployments wanting multi-device sync without a database server
+- **Local-first embedded backend** (#574) — for local-first deployments wanting multi-device sync without a database server
 - **PalaceStore** (#643) — bespoke storage layer purpose-built for MemPalace's access patterns (draft, evaluating)
 
 Users choose their backend at init time. Existing ChromaDB palaces continue to work unchanged.
@@ -56,7 +56,7 @@ On-device natural language processing via local models (#507):
 These are under consideration for v4 stable or later:
 
 - Synapse advanced retrieval — MMR, pinned memory, query expansion (#596)
-- Multi-device sync (#575) — depends on LanceDB backend
+- Multi-device sync (#575) — depends on the local-first embedded backend
 - Multilingual embedding support (#488, #442)
 - Qdrant vector search backend (#381)
 

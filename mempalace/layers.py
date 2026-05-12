@@ -8,11 +8,11 @@ Load only what you need, when you need it.
     Layer 0: Identity       (~100 tokens)   — Always loaded. "Who am I?"
     Layer 1: Essential Story (~500-800)      — Always loaded. Top moments from the palace.
     Layer 2: On-Demand      (~200-500 each)  — Loaded when a topic/wing comes up.
-    Layer 3: Deep Search    (unlimited)      — Full ChromaDB semantic search.
+    Layer 3: Deep Search    (unlimited)      — Full storage-backend semantic search.
 
 Wake-up cost: ~600-900 tokens (L0+L1). Leaves 95%+ of context free.
 
-Reads directly from ChromaDB (mempalace_drawers)
+Reads directly from the active MemPalace storage backend
 and ~/.mempalace/identity.txt.
 """
 
@@ -90,7 +90,7 @@ class Layer1:
         self.wing = wing
 
     def generate(self) -> str:
-        """Pull top drawers from ChromaDB and format as compact L1 text."""
+        """Pull top drawers from the active backend and format as compact L1 text."""
         try:
             col = _get_collection(self.palace_path, create=False)
         except Exception:
@@ -186,7 +186,7 @@ class Layer2:
     """
     ~200-500 tokens per retrieval.
     Loaded when a specific topic or wing comes up in conversation.
-    Queries ChromaDB with a wing/room filter.
+    Queries the active backend with a wing/room filter.
     """
 
     def __init__(self, palace_path: str = None):

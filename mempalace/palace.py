@@ -50,6 +50,7 @@ except ImportError:
     PgVectorBackend = None
 
 from .backends.base import PalaceRef
+from .config import MempalaceConfig
 
 # Schema version for drawer normalization. Bump when the normalization
 # pipeline changes in a way that existing drawers should be rebuilt to pick up
@@ -62,24 +63,29 @@ from .backends.base import PalaceRef
 NORMALIZE_VERSION = 2
 
 
+def get_active_backend_name(config: MempalaceConfig | None = None) -> str:
+    """Return the canonical active backend name for this process."""
+    return (config or MempalaceConfig()).backend
+
+
 def _get_default_backend():
     """Lazily instantiate the configured backend.
 
-    Priority: MEMPALACE_BACKEND env var > ChromaBackend (default).
-    PgVectorBackend is used when MEMPALACE_BACKEND=pgvector.
+    Priority: env override > config.json > ChromaBackend default.
+    PgVectorBackend is used when the active backend resolves to ``pgvector``.
     """
-    backend_name = os.environ.get("MEMPALACE_BACKEND", "").lower()
+    backend_name = get_active_backend_name()
     if backend_name == "pgvector":
         if PgVectorBackend is None:
             raise RuntimeError(
                 "PgVectorBackend is not installed. "
-                "Install psycopg2-binary to use MEMPALACE_BACKEND=pgvector."
+                "Install psycopg2-binary to use the pgvector backend."
             )
         return PgVectorBackend()
     if not _HAS_CHROMADB:
         raise RuntimeError(
             "ChromaDB is required for the default backend but is not installed. "
-            "Use MEMPALACE_BACKEND=pgvector to use the PostgreSQL backend instead."
+            "Configure the pgvector backend instead."
         )
     return ChromaBackend()
 
@@ -97,7 +103,7 @@ def get_collection(
     backend = _get_default_backend()
     # PgVectorBackend uses PalaceRef (RFC 001 contract); ChromaBackend uses
     # the legacy positional palace_path arg. Route accordingly.
-    backend_name = os.environ.get("MEMPALACE_BACKEND", "").lower()
+    backend_name = get_active_backend_name()
     if backend_name == "pgvector" and PgVectorBackend is not None:
         palace_ref = PalaceRef(
             id=palace_path,

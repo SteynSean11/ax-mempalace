@@ -16,7 +16,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from .palace import get_closets_collection, get_collection
+from .palace import get_active_backend_name, get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
 # Multiple lines may join with newlines inside one closet document.
@@ -374,6 +374,85 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
+def _bm25_only_via_pgvector(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    max_candidates: int = 500,
+    _include_internal: bool = False,
+) -> dict:
+    """BM25-only search reading drawers from the active pgvector backend."""
+    try:
+        drawers_col = get_collection(palace_path, create=False)
+    except Exception as e:
+        return {"error": "No palace found", "hint": f"pgvector backend unavailable: {e}"}
+
+    where = build_where_filter(wing, room)
+    try:
+        rows = drawers_col.get(
+            where=where or None,
+            limit=max_candidates,
+            include=["documents", "metadatas"],
+        )
+    except Exception as e:
+        return {"error": f"pgvector BM25 fetch failed: {e}"}
+
+    candidates = []
+    for doc, meta in zip(rows.documents, rows.metadatas):
+        meta = meta or {}
+        candidates.append(
+            {
+                "text": doc or "",
+                "source_file": Path(meta.get("source_file", "?")).name,
+                "wing": meta.get("wing", "unknown"),
+                "room": meta.get("room", "unknown"),
+                "created_at": meta.get("filed_at", "unknown"),
+                "matched_via": "bm25_pgvector",
+                "_source_file_full": meta.get("source_file"),
+                "_chunk_index": meta.get("chunk_index"),
+            }
+        )
+
+    if not candidates:
+        return {
+            "query": query,
+            "filters": {"wing": wing, "room": room},
+            "total_before_filter": 0,
+            "results": [],
+            "fallback": "bm25_only_via_pgvector",
+            "fallback_reason": "vector_search_disabled",
+        }
+
+    docs = [c["text"] for c in candidates]
+    bm25_raw = _bm25_scores(query, docs)
+    max_bm25 = max(bm25_raw) if bm25_raw else 0.0
+    for candidate, raw in zip(candidates, bm25_raw):
+        candidate["bm25_score"] = round(raw, 3)
+        candidate["_score"] = (raw / max_bm25) if max_bm25 > 0 else 0.0
+
+    candidates.sort(key=lambda entry: entry["_score"], reverse=True)
+    hits = candidates[:n_results]
+    for hit in hits:
+        hit["distance"] = None
+        hit["effective_distance"] = None
+        hit["closet_boost"] = 0.0
+        hit["similarity"] = round(hit.pop("_score"), 3)
+        if not _include_internal:
+            hit.pop("_source_file_full", None)
+            hit.pop("_chunk_index", None)
+
+    return {
+        "query": query,
+        "filters": {"wing": wing, "room": room},
+        "total_before_filter": len(candidates),
+        "results": hits,
+        "fallback": "bm25_only_via_pgvector",
+        "fallback_reason": "vector_search_disabled",
+    }
+
+
 def _bm25_only_via_sqlite(
     query: str,
     palace_path: str,
@@ -569,6 +648,43 @@ def _bm25_only_via_sqlite(
     }
 
 
+def _bm25_only_via_active_backend(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    max_candidates: int = 500,
+    _include_internal: bool = False,
+) -> dict:
+    """Backend-aware lexical fallback.
+
+    Pgvector-backed ApexSigma installs must not consult the legacy local
+    Chroma SQLite sidecar for recall. When pgvector is active, lexical
+    fallback reads the current backend directly. Legacy Chroma palaces keep
+    the existing sqlite FTS5 path.
+    """
+    if get_active_backend_name() == "pgvector":
+        return _bm25_only_via_pgvector(
+            query,
+            palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+            max_candidates=max_candidates,
+            _include_internal=_include_internal,
+        )
+    return _bm25_only_via_sqlite(
+        query,
+        palace_path,
+        wing=wing,
+        room=room,
+        n_results=n_results,
+        max_candidates=max_candidates,
+        _include_internal=_include_internal,
+    )
+
+
 def _merge_bm25_union_candidates(
     hits: list,
     query: str,
@@ -604,7 +720,7 @@ def _merge_bm25_union_candidates(
         return
 
     try:
-        bm25_extra = _bm25_only_via_sqlite(
+        bm25_extra = _bm25_only_via_active_backend(
             query,
             palace_path,
             wing=wing,
@@ -696,7 +812,7 @@ def search_memories(
 
     Args:
         query: Natural language search query.
-        palace_path: Path to the ChromaDB palace directory.
+        palace_path: Logical palace path / cache key for the active backend.
         wing: Optional wing filter.
         room: Optional room filter.
         n_results: Max results to return.
@@ -704,7 +820,7 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
-        vector_disabled: When True, route to the sqlite-only BM25 fallback
+        vector_disabled: When True, route to the backend-aware BM25 fallback
             (#1222). Set by the MCP server when the HNSW capacity probe
             detects a divergence that would segfault chromadb on segment
             load.
@@ -715,7 +831,7 @@ def search_memories(
               Cheap; works well when query and target docs agree in the
               embedding space.
             * ``"union"`` — also pull top ``n_results * 3`` BM25 candidates
-              from the sqlite FTS5 index and merge them into the rerank pool
+              from the active backend and merge them into the rerank pool
               (deduped by source_file). Catches docs with strong BM25 signal
               that are vector-distant from the query (e.g. terminology guides
               looked up by narrative-shaped queries; policy clauses surfaced
@@ -733,7 +849,7 @@ def search_memories(
     _validate_candidate_strategy(candidate_strategy)
 
     if vector_disabled:
-        return _bm25_only_via_sqlite(
+        return _bm25_only_via_active_backend(
             query,
             palace_path,
             wing=wing,
