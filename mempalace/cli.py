@@ -936,6 +936,8 @@ def cmd_compress(args):
 
 
 def main():
+    from .hooks_cli import SUPPORTED_HARNESSES
+
     version_label = f"MemPalace {__version__}"
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
@@ -1159,7 +1161,7 @@ def main():
     p_hook_run.add_argument(
         "--harness",
         required=True,
-        choices=["claude-code", "codex"],
+        choices=sorted(SUPPORTED_HARNESSES),
         help="Harness type (determines stdin JSON format)",
     )
 

@@ -94,6 +94,37 @@ def _validate_transcript_path(transcript_path: str) -> Path:
     return path
 
 
+def _iter_hook_messages(path: Path):
+    """Yield normalized message dicts from supported hook transcript formats."""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+
+    if path.suffix == ".json":
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if isinstance(data, dict):
+            items = data.get("messages", [])
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        yield item
+        return
+
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict):
+            yield entry
+
+
 def _count_human_messages(transcript_path: str) -> int:
     """Count human messages in a JSONL transcript, skipping command-messages."""
     path = _validate_transcript_path(transcript_path)
@@ -104,36 +135,29 @@ def _count_human_messages(transcript_path: str) -> int:
     if not path.is_file():
         return 0
     count = 0
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    msg = entry.get("message", {})
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, str):
-                            if "<command-message>" in content:
-                                continue
-                        elif isinstance(content, list):
-                            text = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
-                            )
-                            if "<command-message>" in text:
-                                continue
-                        count += 1
-                    # Also handle Codex CLI transcript format
-                    # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
-                    elif entry.get("type") == "event_msg":
-                        payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
-                            msg_text = payload.get("message", "")
-                            if isinstance(msg_text, str) and "<command-message>" not in msg_text:
-                                count += 1
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-    except OSError:
-        return 0
+    for entry in _iter_hook_messages(path):
+        msg = entry.get("message", {})
+        if isinstance(entry, dict) and ("role" in entry) and (not isinstance(msg, dict) or not msg):
+            # Hermes stores role/content at the top level for both .jsonl and session .json.
+            msg = entry
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                if "<command-message>" in content:
+                    continue
+            elif isinstance(content, list):
+                text = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+                if "<command-message>" in text:
+                    continue
+            count += 1
+        # Also handle Codex CLI transcript format
+        # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
+        elif entry.get("type") == "event_msg":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict) and payload.get("type") == "user_message":
+                msg_text = payload.get("message", "")
+                if isinstance(msg_text, str) and "<command-message>" not in msg_text:
+                    count += 1
     return count
 
 
@@ -342,36 +366,29 @@ def _extract_recent_messages(transcript_path: str, count: int = _RECENT_MSG_COUN
     if not path.is_file():
         return []
     messages = []
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    # Claude Code format
-                    msg = entry.get("message") or entry.get("event_message") or {}
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            content = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
-                            )
-                        if not isinstance(content, str) or not content.strip():
-                            continue
-                        if "<command-message>" in content or "<system-reminder>" in content:
-                            continue
-                        messages.append(content.strip()[:200])
-                    # Codex CLI format
-                    elif entry.get("type") == "event_msg":
-                        payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
-                            text = payload.get("message", "")
-                            if isinstance(text, str) and text.strip():
-                                if "<command-message>" not in text:
-                                    messages.append(text.strip()[:200])
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-    except OSError:
-        return []
+    for entry in _iter_hook_messages(path):
+        # Claude Code format
+        msg = entry.get("message") or entry.get("event_message") or {}
+        if isinstance(entry, dict) and ("role" in entry) and (not isinstance(msg, dict) or not msg):
+            # Hermes stores role/content at the top level for both .jsonl and session .json.
+            msg = entry
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+            if not isinstance(content, str) or not content.strip():
+                continue
+            if "<command-message>" in content or "<system-reminder>" in content:
+                continue
+            messages.append(content.strip()[:200])
+        # Codex CLI format
+        elif entry.get("type") == "event_msg":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict) and payload.get("type") == "user_message":
+                text = payload.get("message", "")
+                if isinstance(text, str) and text.strip():
+                    if "<command-message>" not in text:
+                        messages.append(text.strip()[:200])
     return messages[-count:]
 
 
@@ -500,7 +517,7 @@ def _ingest_transcript(transcript_path: str):
         pass
 
 
-SUPPORTED_HARNESSES = {"claude-code", "codex"}
+SUPPORTED_HARNESSES = {"claude-code", "codex", "hermes"}
 
 
 def _parse_harness_input(data: dict, harness: str) -> dict:
@@ -512,6 +529,7 @@ def _parse_harness_input(data: dict, harness: str) -> dict:
         "session_id": _sanitize_session_id(str(data.get("session_id", "unknown"))),
         "stop_hook_active": data.get("stop_hook_active", False),
         "transcript_path": str(data.get("transcript_path", "")),
+        "force_save": data.get("force_save", False),
     }
 
 
@@ -554,6 +572,7 @@ def hook_stop(data: dict, harness: str):
     session_id = parsed["session_id"]
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
+    force_save = bool(parsed.get("force_save", False))
 
     # If already in a block-mode save cycle, let through (infinite-loop prevention).
     # Silent mode saves directly without returning {"decision":"block"}, so there's
@@ -596,7 +615,7 @@ def hook_stop(data: dict, harness: str):
 
     _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
 
-    if since_last >= SAVE_INTERVAL and exchange_count > 0:
+    if (since_last >= SAVE_INTERVAL and exchange_count > 0) or (force_save and exchange_count > 0):
         _log(f"TRIGGERING SAVE at exchange {exchange_count}")
 
         # Read hook settings from config

@@ -111,6 +111,38 @@ def test_count_handles_list_content(tmp_path):
     assert _count_human_messages(str(transcript)) == 1
 
 
+def test_count_human_messages_hermes_jsonl(tmp_path):
+    transcript = tmp_path / "hermes.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"role": "user", "content": "hello from hermes"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": "<command-message>skip</command-message>"},
+            {"role": "user", "content": [{"type": "text", "text": "hello again"}]},
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 2
+
+
+def test_count_human_messages_hermes_session_json(tmp_path):
+    transcript = tmp_path / "session.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "session_id": "s1",
+                "messages": [
+                    {"role": "user", "content": "hello from hermes session"},
+                    {"role": "assistant", "content": "hi"},
+                    {"role": "tool", "content": "{\"ok\":true}"},
+                    {"role": "user", "content": [{"type": "text", "text": "hello again"}]},
+                ],
+            }
+        )
+    )
+    assert _count_human_messages(str(transcript)) == 2
+
+
 def test_count_missing_file():
     assert _count_human_messages("/nonexistent/path.jsonl") == 0
 
@@ -155,6 +187,40 @@ def test_extract_recent_messages_skips_commands(tmp_path):
     msgs = _extract_recent_messages(str(transcript))
     assert len(msgs) == 1
     assert msgs[0] == "real msg"
+
+
+def test_extract_recent_messages_hermes_jsonl(tmp_path):
+    transcript = tmp_path / "hermes.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"role": "user", "content": "first hermes msg"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "<command-message>skip</command-message>"},
+            {"role": "user", "content": [{"type": "text", "text": "second hermes msg"}]},
+        ],
+    )
+    msgs = _extract_recent_messages(str(transcript))
+    assert msgs == ["first hermes msg", "second hermes msg"]
+
+
+def test_extract_recent_messages_hermes_session_json(tmp_path):
+    transcript = tmp_path / "session.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "session_id": "s1",
+                "messages": [
+                    {"role": "user", "content": "first session msg"},
+                    {"role": "assistant", "content": "reply"},
+                    {"role": "user", "content": "<command-message>skip</command-message>"},
+                    {"role": "user", "content": [{"type": "text", "text": "second session msg"}]},
+                ],
+            }
+        )
+    )
+    msgs = _extract_recent_messages(str(transcript))
+    assert msgs == ["first session msg", "second session msg"]
 
 
 def test_extract_recent_messages_missing_file():
@@ -237,6 +303,58 @@ def test_stop_hook_saves_silently_at_interval(tmp_path):
     assert "hooks" in result["systemMessage"]
     # tmp_path has no "-Projects-" segment, so _wing_from_transcript_path falls back to "wing_sessions"
     mock_save.assert_called_once_with(str(transcript), "test", wing="wing_sessions", toast=False)
+
+
+def test_stop_hook_saves_hermes_transcript_at_interval(tmp_path):
+    transcript = tmp_path / "hermes.jsonl"
+    _write_transcript(
+        transcript,
+        [{"role": "user", "content": f"msg {i}"} for i in range(SAVE_INTERVAL)],
+    )
+    save_result = {"count": 15, "themes": ["hooks"]}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
+        result = _capture_hook_output(
+            hook_stop,
+            {"session_id": "hermes-test", "stop_hook_active": False, "transcript_path": str(transcript)},
+            harness="hermes",
+            state_dir=tmp_path,
+        )
+    assert result["systemMessage"].startswith("\u2726 15 memories woven into the palace")
+    mock_save.assert_called_once_with(
+        str(transcript), "hermes-test", wing="wing_sessions", toast=False
+    )
+
+
+def test_stop_hook_force_saves_hermes_session_json_below_interval(tmp_path):
+    transcript = tmp_path / "session.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "session_id": "s1",
+                "messages": [
+                    {"role": "user", "content": "brief session"},
+                    {"role": "assistant", "content": "reply"},
+                ],
+            }
+        )
+    )
+    save_result = {"count": 1, "themes": ["brief"]}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
+        result = _capture_hook_output(
+            hook_stop,
+            {
+                "session_id": "hermes-finalize",
+                "stop_hook_active": False,
+                "transcript_path": str(transcript),
+                "force_save": True,
+            },
+            harness="hermes",
+            state_dir=tmp_path,
+        )
+    assert result["systemMessage"].startswith("\u2726 1 memories woven into the palace")
+    mock_save.assert_called_once_with(
+        str(transcript), "hermes-finalize", wing="wing_sessions", toast=False
+    )
 
 
 def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
@@ -683,6 +801,20 @@ def test_parse_harness_input_valid():
     )
     assert result["session_id"] == "abc-123"
     assert result["stop_hook_active"] is True
+
+
+def test_parse_harness_input_hermes():
+    result = _parse_harness_input(
+        {
+            "session_id": "sess_test123",
+            "stop_hook_active": False,
+            "transcript_path": "/home/steynsean11/.hermes/sessions/sess_test123.jsonl",
+        },
+        "hermes",
+    )
+    assert result["session_id"] == "sess_test123"
+    assert result["stop_hook_active"] is False
+    assert result["transcript_path"].endswith("sess_test123.jsonl")
 
 
 # --- hook_stop with OSError on write ---
