@@ -22,6 +22,7 @@ from typing import Optional
 import psycopg2
 import requests
 
+from ..config import MempalaceConfig
 from .base import (
     BackendError,
     BaseBackend,
@@ -97,6 +98,18 @@ def _get_conn() -> psycopg2.extensions.connection:
     )
     conn.autocommit = False
     return conn
+
+
+def _normalize_metadata(metadata: Optional[dict], table_name: str) -> dict:
+    """Fill backend-scoping metadata required by palace-aware API filters."""
+    normalized = dict(metadata or {})
+    normalized.setdefault("collection_name", table_name)
+
+    palace_id = MempalaceConfig().palace_id
+    if palace_id:
+        normalized.setdefault("palace_id", palace_id)
+
+    return normalized
 
 
 # ── Batch helper ──────────────────────────────────────────────────────────────
@@ -181,7 +194,7 @@ class PgVectorCollection(BaseCollection):
         embeddings: list[list[float]],
         upsert: bool = True,
     ) -> None:
-        meta = metadatas or [{}] * len(documents)
+        meta = [_normalize_metadata(m, self._table) for m in (metadatas or [{}] * len(documents))]
         rows = list(zip(ids, documents, meta, embeddings))
 
         for batch in _batches(rows, 500):

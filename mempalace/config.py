@@ -95,6 +95,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 DEFAULT_BACKEND = "chroma"
+DEFAULT_PALACE_ID = ""
 _BACKEND_ALIASES = {
     "chroma": "chroma",
     "chromadb": "chroma",
@@ -210,6 +211,14 @@ class MempalaceConfig:
     def collection_name(self):
         """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def palace_id(self):
+        """Logical palace identifier for backends that namespace by palace."""
+        env_val = os.environ.get("MEMPALACE_PALACE_ID") or os.environ.get("MEMPAL_PALACE_ID")
+        if env_val:
+            return str(env_val).strip()
+        return str(self._file_config.get("palace_id", DEFAULT_PALACE_ID)).strip()
 
     @property
     def people_map(self):
@@ -344,6 +353,7 @@ class MempalaceConfig:
             default_config = {
                 "backend": DEFAULT_BACKEND,
                 "palace_path": DEFAULT_PALACE_PATH,
+                "palace_id": DEFAULT_PALACE_ID,
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,

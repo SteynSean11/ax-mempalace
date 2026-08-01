@@ -14,4 +14,4 @@ export OLLAMA_EMBEDDING_MODEL="${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text:v1.5}"
 export MEMPALACE_BACKEND=pgvector
 export PYTHONPATH="/home/steynsean11/projects/apexsigma-eco-data/mempalace:${PYTHONPATH:-}"
 echo "[start-mcp] Starting MemPalace MCP server with pgvector backend..." >&2
-exec /home/steynsean11/.hermes/hermes-agent/venv/bin/python3 -m mempalace.mcp_server
+exec /home/steynsean11/.local/share/uv/tools/mempalace/bin/python3 -m mempalace.mcp_server

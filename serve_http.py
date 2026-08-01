@@ -17,6 +17,7 @@ Env resolved (in priority order):
 
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ── 1. Source vault credentials before importing mempalace ───────────────────
@@ -62,6 +63,8 @@ _restore_stdout()
 
 # ── 4. Build FastMCP server ───────────────────────────────────────────────────
 from fastmcp import FastMCP  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
 
 mcp = FastMCP(
     name="mempalace",
@@ -79,6 +82,20 @@ for _tool_name, _tool_config in TOOLS.items():
         name=_tool_name,
         description=_tool_config["description"],
     )(_tool_config["handler"])
+
+
+@mcp.custom_route("/", methods=["GET"], include_in_schema=False)
+async def root_health(_request: Request) -> JSONResponse:
+    """Root health endpoint for local heartbeat checks."""
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "mempalace",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "mcp_endpoint": "http://localhost:5031/mcp",
+        },
+        status_code=200,
+    )
 
 # ── 5. Entry point ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
