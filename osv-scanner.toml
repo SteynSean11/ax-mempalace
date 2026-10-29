@@ -1,0 +1,7 @@
+# ax-mempalace -- OSV-Scanner configuration (read by security.yml's osv job).
+#
+# Every ignore is a time-boxed exception: owner-approved, with a reason and
+# an expiry. When `ignoreUntil` passes the advisory fails the scan again and
+# must be re-reviewed, not silently renewed.
+#
+# No exceptions are currently approved for this repository.

@@ -1,0 +1,143 @@
+name: Security
+
+# Security baseline for ax-mempalace (a fork of MemPalace/mempalace).
+# Ported from the shared ApexSigma CI baseline (ax-trax / ax-gateway /
+# ax-omega / ax-eco-context) as part of RUNBOOK-INFRA-700-001 gate GC,
+# finding C4.
+#
+# Deliberately scoped to what this fork needs:
+#   - Gitleaks: the fork publishes on PyPI and is a public repo, so a
+#     committed-secret scan on every PR is the minimum bar.
+#   - OSV: the fork keeps a root uv.lock, so the dependency scan has a
+#     real input.
+#   - Semgrep: the fork is a fork; upstream's ruleset is a reasonable
+#     static-analysis baseline.
+#
+# Upstream-only jobs (CodeQL, dependency review) are not ported: they need
+# GitHub Advanced Security, which is not provisioned here. See
+# .github/workflows/README-fork-notes.md.
+
+on:
+  pull_request:
+    branches: [beta, develop]
+  push:
+    branches: [beta, develop]
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gitleaks:
+    name: Gitleaks current-tree scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Gitleaks with checksum verification
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL "${base}/${archive}" -o "/tmp/${archive}"
+          curl -sSfL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o /tmp/gitleaks_checksums.txt
+          grep "${archive}" /tmp/gitleaks_checksums.txt > /tmp/gitleaks_linux_x64.sha256
+          (cd /tmp && sha256sum -c /tmp/gitleaks_linux_x64.sha256)
+          tar -xzf "/tmp/${archive}" -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan current tracked tree for committed secrets
+        run: gitleaks dir . --redact --no-banner --exit-code 1
+
+  osv:
+    name: OSV dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Detect root lockfiles
+        id: lockfiles
+        run: |
+          set -euo pipefail
+          if [[ -f uv.lock ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Root lockfile found: uv.lock"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No supported root lockfile found; OSV scan is a clean no-op."
+          fi
+
+      - name: Run OSV-Scanner
+        if: steps.lockfiles.outputs.found == 'true'
+        uses: google/osv-scanner-action/osv-scanner-action@b00f71e051ddddc6e46a193c31c8c0bf283bf9e6 # v2.1.0
+        with:
+          # osv-scanner.toml holds owner-approved, time-boxed ignores.
+          scan-args: |-
+            --config=osv-scanner.toml
+            --lockfile=uv.lock
+
+  semgrep:
+    name: Semgrep static analysis
+    # The local/CI substitute for CodeQL when GHAS is unavailable. Uses the
+    # free `p/security-audit` registry ruleset with --metrics=off, not the
+    # `auto` config (which refuses to run with metrics off) and not the
+    # token-gated Semgrep CI/AppSec Platform integration. Image digest
+    # verified live against Docker Hub's registry API for the
+    # semgrep/semgrep:1.177.0 tag on 2026-09-19 — re-verify before bumping,
+    # this is not a floating tag.
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.177.0@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # The baseline comparison below needs the target branch's history,
+          # not just the PR head.
+          fetch-depth: 0
+
+      - name: Run Semgrep
+        # Two deliberate differences from the shared baseline:
+        #
+        # 1. Scan root `.` instead of `src`. The shared baseline scans a
+        #    `src/` layout; this fork is a flat package (the `mempalace/`
+        #    package at the repository root). `src` does not exist here, and
+        #    `semgrep --error src` aborts with "Invalid scanning root: src".
+        #
+        # 2. `--baseline-commit` against the integration branch. The upstream
+        #    tree carries 6 pre-existing findings under `p/security-audit`
+        #    (all WARNING severity: five `dynamic-urllib-use-detected`, one
+        #    `avoid-pickle`). This is inherited upstream code, not a
+        #    regression from this port, and a C4 baseline must not land red.
+        #    `--baseline-commit` reports only findings that are NOT already
+        #    present on the baseline commit, so existing debt is
+        #    grandfathered and any NEW issue still fails the build.
+        #    `--severity ERROR` drops the WARNING-severity audit rules,
+        #    which are advisory ("audit uses of urllib calls to ensure...")
+        #    rather than defects.
+        #
+        # Verified locally on this tree: baseline scan -> 0 findings;
+        # a newly added file with a real `shell=True` call -> 1 blocking
+        # finding.
+        env:
+          BASELINE_REF: origin/${{ vars.MAR_BASE_BRANCH || 'beta' }}
+        run: >-
+          semgrep scan --config p/security-audit --metrics=off
+          --severity ERROR --baseline-commit "${BASELINE_REF}" --error .
+          --exclude=tests --exclude=benchmarks --exclude=node_modules
+          --exclude=.git --exclude=uv.lock
