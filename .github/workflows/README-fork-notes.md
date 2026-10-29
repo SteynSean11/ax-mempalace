@@ -60,6 +60,67 @@ Verified locally on this tree:
 | baseline scan (`--baseline-commit origin/beta`) | 0 findings |
 | a newly added file with a real `subprocess.run(..., shell=True)` call | **1 blocking finding** |
 
+## The OSV scan: what was done to make it green
+
+The OSV scan is the part of the Security gate that needed real work. The
+fork's `uv.lock` had drifted well behind upstream and carried **103
+advisories**. The resolution was three steps, all in this PR.
+
+### Step 1 — drop Python 3.9
+
+`requires-python` moved from `>=3.9` to `>=3.10`.
+
+Two separate failures had the same root cause. The CI matrix leg failed
+with `The version '3.9' with architecture 'x64' was not found for Ubuntu
+26.04` (ubuntu-latest moved to Ubuntu 26.04, where setup-python has no 3.9
+build). And the OSV scan reported `urllib3 2.6.3`, `requests 2.32.5` and
+`starlette 1.0.0` — the vulnerable versions are reachable in the lockfile
+ONLY through the `python_full_version < '3.10'` marker, because every
+patched release (`urllib3 2.8.0`, `requests 2.34.2`, `starlette 1.10.0`)
+requires Python >= 3.10. Upgrading the packages alone does not help; the
+marker keeps the old pins.
+
+This is not a divergence from upstream — upstream's default branch
+(`develop`) already declares `requires-python = ">=3.10"`. The fork's
+`beta` was behind upstream on this.
+
+### Step 2 — full `uv lock --upgrade`
+
+Cleared 77 of the 103 advisories. The same shape as the C2 rounds the core
+repos already ran (ax-omega #47/#50/#51, ax-trax #62/#64/#68, ax-gateway
+#54, ax-eco-context #53).
+
+### Step 3 — time-boxed `osv-scanner.toml` exceptions for the last 26
+
+The remaining 26 cannot be fixed while this repository supports Python
+>= 3.10. Each entry in `osv-scanner.toml` carries an `ignoreUntil` and a
+written reason, per SPEC-CICD-001 §11.7:
+
+| Group | Count | Why it cannot be fixed here |
+|---|---|---|
+| `filelock 4.1.0` | 15 | Fixed in 4.2.1, which requires Python >= 3.11. The vulnerable pin exists only under the `python_full_version < '3.11'` marker. |
+| `dnspython 2.8.0` | 1 | Fixed in 2.9.0, which requires Python >= 3.11. Same marker situation. |
+| `chromadb 1.5.9` | 4 (+4 aliases) | **No fixed release exists** — the OSV records carry an empty `fixed` list and 1.5.9 is the newest release on PyPI. |
+
+The `filelock` and `dnspython` entries are **cleared the moment this
+repository drops Python 3.10** (`requires-python >= 3.11`). That is a
+separate decision from the C4 CI baseline port and is recorded here as a
+known gap.
+
+The four `chromadb` advisories are genuine upstream debt. The exposure is
+bounded for this deployment: mempalace runs ChromaDB as a local,
+single-tenant store bound to 127.0.0.1, with no HTTP server, no
+multi-tenant mode and no RBAC provider enabled — the pre-authentication and
+cross-tenant advisories need an exposed Chroma server, which this
+deployment does not have.
+
+Verified locally with osv-scanner 2.1.0 (the version the CI action pins):
+
+| Scenario | Result |
+|---|---|
+| `osv-scanner scan --lockfile=uv.lock --config=osv-scanner.toml` | "No issues found", exit 0 |
+| the same scan with one ignore removed | the advisory is reported again, exit non-zero |
+
 ## The CI workflow's `name:` was changed
 
 Upstream's `ci.yml` was named `Tests`. It is named `CI` here because the
@@ -76,6 +137,27 @@ That path is fixed by the workflow contract in SPEC-MAR-003, so the file
 cannot live under `.github/` without diverging from the byte-identical
 `mar-review.yml` requirement. The file is a pure addition — upstream has no
 `scripts/mar_gate.py` — so an upstream sync stays clean.
+
+## Known gaps
+
+These are NOT claims that the surface is covered. They are the parts of the
+baseline that could not be closed in the C4 port.
+
+1. **The upstream lint drift is still there.** `ruff check .` reports 3
+   pre-existing upstream findings (`mempalace/backends/pgvector.py:25`
+   F401, `mempalace/mcp_server.py:81` F401, `mempalace/palace.py:52` E402)
+   and `ruff format --check .` reports 3 more upstream files. The lint job
+   is scoped to `scripts/` so the gate is meaningful rather than red on
+   arrival. Fixing upstream's drift here would make the fork diverge from
+   upstream on files upstream owns, and would conflict on every upstream
+   sync. This lint job had never run on this fork before (the fork has zero
+   workflow runs in its history), which is why the drift went unnoticed.
+
+2. **16 OSV advisories are time-boxed, not fixed.** See "Step 3" above.
+   The `filelock` and `dnspython` ones clear when Python 3.10 support is
+   dropped. The four `chromadb` ones have no fixed release at any version.
+
+3. **`deploy-docs.yml` is disabled.** The fork has no GitHub Pages site.
 
 ## What still needs an owner
 
