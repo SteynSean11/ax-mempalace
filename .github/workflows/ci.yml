@@ -22,7 +22,26 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        # Python 3.9 is dropped. It was pinned to ubuntu-24.04 (the
+        # actions/python-versions manifest ships 3.9.25 for linux-22.04
+        # and linux-24.04 only; ubuntu-latest moved to Ubuntu 26.04
+        # "resolute", where setup-python has no 3.9 build, so the job
+        # failed with "The version '3.9' with architecture 'x64' was not
+        # found for Ubuntu 26.04").
+        #
+        # The deeper reason is the OSV scan: urllib3 2.6.3, requests
+        # 2.32.5 and starlette 1.0.0 are the patched-against versions'
+        # predecessors and are only reachable in the lockfile through the
+        # `python_full_version < '3.10'` marker. Every patched release
+        # (urllib3 2.8.0, requests 2.34.2, starlette 1.10.0) requires
+        # Python >= 3.10, so the marker branch cannot be removed while 3.9
+        # is supported.
+        #
+        # This brings the fork in line with upstream, whose default branch
+        # (`develop`) already declares `requires-python = ">=3.10"` with
+        # the matrix ["3.10", "3.11", "3.13"]. The fork's `beta` was
+        # simply behind upstream on this.
+        python-version: ["3.10", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

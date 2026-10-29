@@ -157,7 +157,7 @@ verbatim drawer per user/assistant message, idempotent and resume-safe.
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - A vector-store backend (ChromaDB by default)
 - ~300 MB disk for the default embedding model
 
@@ -183,7 +183,7 @@ MIT — see [LICENSE](LICENSE).
 <!-- Link Definitions -->
 [version-shield]: https://img.shields.io/badge/version-3.3.3-4dc9f6?style=flat-square&labelColor=0a0e14
 [release-link]: https://github.com/MemPalace/mempalace/releases
-[python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
+[python-shield]: https://img.shields.io/badge/python-3.10+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/
 [license-shield]: https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14
 [license-link]: https://github.com/MemPalace/mempalace/blob/main/LICENSE
