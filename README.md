@@ -176,6 +176,22 @@ No API key is required for the core benchmark path.
 
 PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## This fork
+
+`SteynSean11/ax-mempalace` is an ApexSigma fork of
+[MemPalace/mempalace](https://github.com/MemPalace/mempalace). The
+integration branch is **`beta`**; upstream's `main` and `develop` are left
+running untouched.
+
+The fork carries the shared ApexSigma CI baseline — a committed-secret
+scan (Gitleaks), an OSV dependency scan, Semgrep static analysis, and the
+Mandatory Agent Review (MAR) gate. Pull requests into `beta` are
+MAR-reviewed; ask for a review with a `/mar` comment.
+
+Fork-specific notes — what was changed relative to upstream, and why —
+are in
+[`.github/workflows/README-fork-notes.md`](.github/workflows/README-fork-notes.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
