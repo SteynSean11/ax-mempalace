@@ -28,3 +28,13 @@ Reconcile the documented ChromaDB-or-pgvector declaration with the desired centr
 - **Keep**: recovery status, authority decisions, security constraints, and proof target.
 - **Prune**: secret values, raw service logs, obsolete path assumptions, and unrelated changes.
 - **Exit With**: changed files, validation, residual risks, and next dependency.
+
+## Decision D1 (RUNBOOK-INFRA-700-001 G0)
+
+The MemPalace persistent backend is **PostgreSQL + pgvector**. ChromaDB is not deployed.
+
+- **Source:** `RUNBOOK-INFRA-700-001` (apexsigma-eco-tools, `trax/T-INFRA-700/`), decision record D1 — owner direction 2026-10-15.
+- **Runbook:** `apexsigma-eco-tools/trax/T-INFRA-700/RUNBOOK-INFRA-700-001.md` — §G0 step 8 (ledger stub).
+- **Consistent with:** O2 ("Local moves to PostgreSQL 18"; `pgvector/pgvector:0.8.7-pg18` pinned by digest at deploy; the VPS uses the system `postgresql@18-main` with the pgvector 0.8.x package).
+- **Scope:** this is a ledger stub recording an owner decision already taken. It decides nothing new, and the backend decision is re-opened for the authority question at G8 entry per O1.
+
