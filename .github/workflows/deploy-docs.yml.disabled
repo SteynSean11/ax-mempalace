@@ -1,5 +1,16 @@
 name: Deploy Docs
 
+# DISABLED on this fork (RUNBOOK-INFRA-700-001 gate GC, finding C4).
+#
+# This workflow deploys the upstream docs site to GitHub Pages. The fork has
+# no GitHub Pages site provisioned (`GET /repos/{owner}/{repo}/pages` returns
+# 404) and no `pages: write` / `id-token: write` grant, so the deploy job
+# cannot succeed here. The file is kept, not deleted, so an upstream sync
+# stays clean and re-enabling is a one-step rename.
+#
+# To re-enable: provision Pages for this repository, then rename this file
+# back to `deploy-docs.yml`.
+
 on:
   push:
     branches: [develop]

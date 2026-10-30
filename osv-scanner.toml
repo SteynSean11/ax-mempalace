@@ -1,0 +1,210 @@
+# ax-mempalace -- OSV-Scanner configuration (read by security.yml's osv job).
+#
+# Every ignore is a time-boxed exception under SPEC-CICD-001 §11.7:
+# owner-approved, with a reason and an expiry. When `ignoreUntil` passes the
+# advisory fails the scan again and must be re-reviewed, not silently renewed.
+#
+# ---------------------------------------------------------------------------
+# Why this file exists
+# ---------------------------------------------------------------------------
+# The C4 baseline port added the OSV dependency scan to this fork. The fork's
+# uv.lock had drifted well behind upstream and carried 103 advisories. The
+# lockfile refresh in this PR cleared 77 of them (103 -> 26).
+#
+# The 26 that remain fall into exactly two groups, and NEITHER can be fixed
+# by a lockfile change while this repository supports Python >= 3.10.
+#
+# ---------------------------------------------------------------------------
+# GROUP 1 -- reachable only through the `python_full_version < '3.11'`
+#             marker (23 advisories)
+# ---------------------------------------------------------------------------
+# The patched releases of these two packages require Python >= 3.11:
+#
+#   dnspython  2.9.0   (fixes GHSA-45c3-73f7-pv4m)   requires-python >=3.11
+#   filelock   4.2.1   (fixes 15 advisories)          requires-python >=3.11
+#
+# The newest releases that still support Python 3.10 are dnspython 2.8.0 and
+# filelock 4.1.0, and both are vulnerable. The resolver therefore keeps the
+# vulnerable pins in the lockfile under a `python_full_version < '3.11'`
+# marker while picking the clean versions for Python >= 3.11:
+#
+#   email-validator  -> dnspython 2.8.0  [python_full_version <  '3.11']
+#                   -> dnspython 2.9.1  [python_full_version >= '3.11']
+#   huggingface-hub  -> filelock   4.1.0  [python_full_version <  '3.11']
+#                   -> filelock   4.2.4  [python_full_version >= '3.11']
+#
+# OSV-Scanner scans the lockfile, not the interpreter, so it reports the
+# Python-3.10 branch even though a default installation on Python >= 3.11
+# never resolves it.
+#
+# These 23 are cleared the moment this repository drops Python 3.10
+# (requires-python >= 3.11). That is a separate decision from the C4 CI
+# baseline port and is recorded as a known gap in
+# .github/workflows/README-fork-notes.md. Until then they are time-boxed
+# below.
+#
+# ---------------------------------------------------------------------------
+# GROUP 2 -- no fixed release exists at any version (4 advisories)
+# ---------------------------------------------------------------------------
+# chromadb 1.5.9 is the newest release on PyPI, and the OSV records for
+# these four advisories carry an EMPTY `fixed` list. There is no version to
+# move to. The repository's own dependency floor is `chromadb>=1.5.4,<2`, so
+# 1.5.9 is already the newest version the floor allows.
+#
+# The exposure is bounded for this repository's use:
+#
+#   PYSEC-2026-311    pre-authentication code injection
+#   PYSEC-2026-3813   any authenticated user can read/write/delete data in
+#                     any tenant's collection
+#   PYSEC-2026-3814   code injection
+#   PYSEC-2026-3815   SimpleRBACAuthorizationProvider does not check which
+#                     tenant, database or collection a permission applies to
+#
+# mempalace runs ChromaDB as a LOCAL, SINGLE-TENANT store bound to
+# 127.0.0.1 by default (see mempalace/config.py and the pgvector backend),
+# with no HTTP server, no multi-tenant mode and no RBAC provider enabled.
+# The pre-authentication and cross-tenant advisories require an exposed
+# Chroma server; the code-injection advisories require an attacker-supplied
+# document to reach a vulnerable parse path.
+#
+# These four are therefore tracked as upstream debt against chromadb, to be
+# re-reviewed on chromadb's next release, and they carry the SAME expiry as
+# the rest so that they cannot silently persist.
+#
+# ---------------------------------------------------------------------------
+# Re-review
+# ---------------------------------------------------------------------------
+# The expiry is 2027-04-30. Before that date, re-check whether chromadb has
+# published a fix, and whether this repository has dropped Python 3.10. If
+# either has happened, remove the corresponding entries here -- the scan
+# must fail again rather than pass on a stale exception.
+
+[[IgnoredVulns]]
+id = "GHSA-45c3-73f7-pv4m"
+ignoreUntil = 2027-04-30
+reason = "dnspython dns.name.from_wire_parser() excessive CPU use. Fixed in 2.9.0, which requires Python >= 3.11; the newest 3.10-compatible release (2.8.0) is vulnerable. The vulnerable pin exists in uv.lock only under the python_full_version < '3.11' marker, so a default install on Python >= 3.11 never resolves it. Cleared by dropping Python 3.10 support."
+
+[[IgnoredVulns]]
+id = "GHSA-2g95-wg33-c5x2"
+ignoreUntil = 2027-04-30
+reason = "filelock SoftFileLock evicts a fresh lock file whose watched age is anomalous. Fixed in 4.2.1, which requires Python >= 3.11; the newest 3.10-compatible release (4.1.0) is vulnerable. The vulnerable pin exists in uv.lock only under the python_full_version < '3.11' marker. Cleared by dropping Python 3.10 support."
+
+[[IgnoredVulns]]
+id = "GHSA-567q-5qvw-pf92"
+ignoreUntil = 2027-04-30
+reason = "filelock Windows oplock on a soft lock's marker. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-6627-m3xw-93mp"
+ignoreUntil = 2027-04-30
+reason = "filelock StrictSoftFileLock creates its claim directories without the intended permission. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-69hj-f68j-2879"
+ignoreUntil = 2027-04-30
+reason = "filelock UnixFileLock truncates and chmods any regular file another user controls. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-8mx5-7m5m-r77g"
+ignoreUntil = 2027-04-30
+reason = "filelock WindowsFileLock ignores mode. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-9c4x-gm8v-wgc4"
+ignoreUntil = 2027-04-30
+reason = "filelock StrictSoftFileLock and SoftReadWriteLock adopt a protocol directory. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-9j6q-wvj5-jgjg"
+ignoreUntil = 2027-04-30
+reason = "filelock symlink swap during SoftFileLock's writability check. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-9vhv-jxww-xfm5"
+ignoreUntil = 2027-04-30
+reason = "filelock ReadWriteLock on Windows acts on SQLite side files. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-crv4-6mhj-j5jh"
+ignoreUntil = 2027-04-30
+reason = "filelock SoftFileLock stale-break restore follows a swapped-in symlink. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-cwqr-hh33-gh44"
+ignoreUntil = 2027-04-30
+reason = "filelock ReadWriteLock: a crafted lock database makes every acquire stall. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-fj95-fr6c-h845"
+ignoreUntil = 2027-04-30
+reason = "filelock SoftReadWriteLock holder refresh writes through a hard link. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-fq56-3cx3-fjxp"
+ignoreUntil = 2027-04-30
+reason = "filelock SoftFileLock stale-lock break removes a live lock file. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-jqc4-5cvw-7w85"
+ignoreUntil = 2027-04-30
+reason = "filelock ReadWriteLock on the hard-link route deletes a directory. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-m462-7rxw-wvpg"
+ignoreUntil = 2027-04-30
+reason = "filelock StrictSoftFileLock follows a symbolic link swapped in at the wrong moment. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-rfpc-qcw5-3pc4"
+ignoreUntil = 2027-04-30
+reason = "filelock SoftFileLock removes a live holder's marker when another user races it. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-v4x8-3wr5-3wq8"
+ignoreUntil = 2027-04-30
+reason = "filelock advisory fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "GHSA-wfhq-q4j2-c37m"
+ignoreUntil = 2027-04-30
+reason = "filelock advisory fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-311"
+ignoreUntil = 2027-04-30
+reason = "chromadb pre-authentication code injection. NO FIXED RELEASE EXISTS -- the OSV record has an empty fixed list and chromadb 1.5.9 is the newest release on PyPI, so there is nothing to move to. Exposure is bounded: mempalace runs ChromaDB as a local, single-tenant store bound to 127.0.0.1 with no HTTP server and no RBAC provider, so a pre-authentication path is not reachable in this deployment. Tracked as upstream chromadb debt; re-review on chromadb's next release."
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3813"
+ignoreUntil = 2027-04-30
+reason = "chromadb: any authenticated user can read, write, update or delete data in any tenant's collection. NO FIXED RELEASE EXISTS. Exposure is bounded: mempalace uses a local, single-tenant store with no multi-tenant mode and no HTTP server, so there are no other tenants and no authenticated remote user. Tracked as upstream chromadb debt; re-review on chromadb's next release."
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3814"
+ignoreUntil = 2027-04-30
+reason = "chromadb code injection. NO FIXED RELEASE EXISTS. Tracked as upstream chromadb debt; re-review on chromadb's next release."
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3815"
+ignoreUntil = 2027-04-30
+reason = "chromadb SimpleRBACAuthorizationProvider does not check which tenant, database or collection a permission applies to. NO FIXED RELEASE EXISTS. Exposure is bounded: mempalace does not enable SimpleRBACAuthorizationProvider -- the local Chroma backend runs without an authorization provider, and the pgvector backend is the recommended path for shared deployments. Tracked as upstream chromadb debt; re-review on chromadb's next release."
+
+[[IgnoredVulns]]
+id = "GHSA-f4j7-r4q5-qw2c"
+ignoreUntil = 2027-04-30
+reason = "Alias of PYSEC-2026-311 (chromadb pre-authentication code injection); no fixed release exists. Same approval and expiry."
+
+[[IgnoredVulns]]
+id = "GHSA-2wm9-hf6c-p5cr"
+ignoreUntil = 2027-04-30
+reason = "Alias of PYSEC-2026-3813 (chromadb cross-tenant collection access); no fixed release exists. Same approval and expiry."
+
+[[IgnoredVulns]]
+id = "GHSA-36p7-vc44-83pf"
+ignoreUntil = 2027-04-30
+reason = "Alias of PYSEC-2026-3814 (chromadb code injection); no fixed release exists. Same approval and expiry."
+
+[[IgnoredVulns]]
+id = "GHSA-xph7-9rjv-w5fr"
+ignoreUntil = 2027-04-30
+reason = "Alias of PYSEC-2026-3815 (chromadb SimpleRBACAuthorizationProvider tenant scoping); no fixed release exists. Same approval and expiry."
