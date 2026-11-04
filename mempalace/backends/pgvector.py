@@ -12,6 +12,7 @@ Schema (already exists — do NOT recreate):
   mempalace_drawers(id TEXT PK, document TEXT, metadata_ JSONB, embedding VECTOR(768), created_at TIMESTAMPTZ)
   mempalace_closets(id TEXT PK, document TEXT, metadata_ JSONB, embedding VECTOR(768), created_at TIMESTAMPTZ)
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,6 @@ import psycopg2
 import requests
 
 from .base import (
-    BackendError,
     BaseBackend,
     BaseCollection,
     GetResult,
@@ -60,9 +60,7 @@ def _get_conn() -> psycopg2.extensions.connection:
         host=os.environ.get("PGHOST", "127.0.0.1"),
         port=os.environ.get("PGPORT", "5432"),
         database=os.environ.get("PGDATABASE", "omega"),
-        user=os.environ.get(
-            "PGUSER", os.environ.get("APEXSIGMA_VAULT_POSTGRES_USER", "omega")
-        ),
+        user=os.environ.get("PGUSER", os.environ.get("APEXSIGMA_VAULT_POSTGRES_USER", "omega")),
         password=os.environ.get(
             "PGPASSWORD", os.environ.get("APEXSIGMA_VAULT_POSTGRES_PASSWORD", "")
         ),
@@ -182,6 +180,58 @@ class PgVectorCollection(BaseCollection):
                 conn.rollback()
                 raise
 
+    def upsert_migrated(
+        self,
+        *,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict],
+        embeddings: list[list[float]],
+        created_at: list[str | None],
+    ) -> None:
+        """Insert copied drawers with source timestamps; never replace a collision.
+
+        The G3b copier checks destination hashes before calling this method.
+        ``ON CONFLICT DO NOTHING`` is a second guard against overwriting an
+        unrelated row if another writer appears between the read and insert.
+        """
+        if self._table not in {"mempalace_drawers", "mempalace_closets"}:
+            raise ValueError("unsupported migration table")
+        if not all(
+            len(values) == len(ids) for values in (documents, metadatas, embeddings, created_at)
+        ):
+            raise ValueError("migration batch lengths differ")
+        if any(len(vector) != self._dim for vector in embeddings):
+            raise ValueError("migration embedding dimension differs from target")
+        if not ids:
+            return
+
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                for drawer_id, document, metadata, vector, timestamp in zip(
+                    ids, documents, metadatas, embeddings, created_at
+                ):
+                    cur.execute(
+                        f"INSERT INTO {self._table} "
+                        "(id, document, metadata_, embedding, created_at) "
+                        "VALUES (%s, %s, %s::jsonb, %s::vector, COALESCE(%s::timestamptz, now())) "
+                        "ON CONFLICT (id) DO NOTHING",
+                        (
+                            drawer_id,
+                            document,
+                            json.dumps(metadata),
+                            f"[{','.join(str(value) for value in vector)}]",
+                            timestamp,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise ValueError(f"target ID appeared during copy: {drawer_id}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     # ── read ops ─────────────────────────────────────────────────────────────
 
     def query(
@@ -292,9 +342,7 @@ class PgVectorCollection(BaseCollection):
         if ids:
             conn = self._conn()
             with conn.cursor() as cur:
-                cur.execute(
-                    f"DELETE FROM {self._table} WHERE id = ANY(%s)", [ids]
-                )
+                cur.execute(f"DELETE FROM {self._table} WHERE id = ANY(%s)", [ids])
             conn.commit()
         elif where:
             wc = self._build_where(where)
@@ -337,9 +385,17 @@ class PgVectorCollection(BaseCollection):
                 elif k.startswith("$"):
                     # operator
                     if k == "$eq":
-                        sub_parts.append(f"metadata_->>'{v}' = '{v}'" if isinstance(v, str) else f"metadata_->>'{list(node.keys())[list(node.values()).index(v)]}' = {v}")
+                        sub_parts.append(
+                            f"metadata_->>'{v}' = '{v}'"
+                            if isinstance(v, str)
+                            else f"metadata_->>'{list(node.keys())[list(node.values()).index(v)]}' = {v}"
+                        )
                     elif k == "$ne":
-                        sub_parts.append(f"metadata_->>'{v}' != '{v}'" if isinstance(v, str) else f"metadata_->>'{list(node.keys())[list(node.values()).index(v)]}' != {v}")
+                        sub_parts.append(
+                            f"metadata_->>'{v}' != '{v}'"
+                            if isinstance(v, str)
+                            else f"metadata_->>'{list(node.keys())[list(node.values()).index(v)]}' != {v}"
+                        )
                     elif k == "$in":
                         col = list(node.keys())[0]
                         vals = ",".join(f"'{x}'" for x in v)
@@ -411,9 +467,7 @@ class PgVectorBackend(BaseBackend):
         # - mempalace_closets  (AAAK pointer index)
         # palace.local_path is used only as a cache key disambiguator.
         if palace.local_path is None:
-            raise PalaceNotFoundError(
-                "PgVectorBackend requires palace.local_path on PalaceRef"
-            )
+            raise PalaceNotFoundError("PgVectorBackend requires palace.local_path on PalaceRef")
         cache_key = f"{palace.local_path}:{collection_name}"
         if cache_key not in self._instances:
             self._instances[cache_key] = PgVectorCollection(
