@@ -1,6 +1,8 @@
 """Offline, explicit Chroma to pgvector drawer copy for INFRA-700 G3b.
 
-The source must be an immutable snapshot. Importing this module does no I/O.
+The source must be a throwaway working copy of an immutable snapshot.
+Opening a palace through ChromaBackend may write to that working copy.
+Importing this module does no I/O.
 The command is a dry run unless ``--execute`` is supplied at an open gate.
 """
 
@@ -39,6 +41,45 @@ class CopyReport:
     planned_ids: tuple[str, ...]
     copied_ids: tuple[str, ...]
     sampled_hashes: tuple[tuple[str, str], ...]
+
+
+class _PgServiceConnection:
+    """Connect only through the explicitly named libpq service."""
+
+    def __init__(self, service: str, connect: Callable | None = None):
+        if not service.strip():
+            raise ValueError("target service name is required")
+        self.service = service
+        self._connect = connect
+        self._connection = None
+
+    def __call__(self):
+        if self._connection is None or self._connection.closed:
+            if self._connect is None:
+                import psycopg2
+
+                self._connect = psycopg2.connect
+            try:
+                self._connection = self._connect(service=self.service)
+            except Exception:
+                raise RuntimeError("target service connection failed") from None
+        return self._connection
+
+    def identity(self) -> dict[str, str]:
+        """Allow-list non-secret target fields from the resolved connection."""
+        parameters = self().get_dsn_parameters()
+        identity = {
+            "host": parameters.get("host", ""),
+            "port": parameters.get("port", ""),
+            "database": parameters.get("dbname", ""),
+        }
+        if not all(identity.values()):
+            raise ValueError("target service must resolve host, port and database")
+        return identity
+
+    def close(self) -> None:
+        if self._connection is not None and not self._connection.closed:
+            self._connection.close()
 
 
 def canonical_hash(drawer_id: str, document: str, metadata: dict) -> str:
@@ -217,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         default="mempalace_drawers",
     )
     parser.add_argument("--target-model", choices=("minilm", "nomic"), required=True)
+    parser.add_argument("--target-service", required=True, help="explicit libpq service name")
     parser.add_argument("--expected-dimension", type=int, required=True)
     parser.add_argument("--page-size", type=int, default=100)
     parser.add_argument("--kg-source", type=Path)
@@ -231,21 +273,22 @@ def main(argv: list[str] | None = None) -> int:
 
     from .backends.base import PalaceRef
     from .backends.chroma import ChromaBackend
-    from .backends.pgvector import PgVectorBackend, _ollama_embed
+    from .backends.pgvector import PgVectorCollection, _ollama_embed
     from .embedding import get_embedding_function
 
-    source_backend = ChromaBackend()
-    target_backend = PgVectorBackend()
+    target_connection = _PgServiceConnection(args.target_service)
+    source_backend = None
     try:
+        target_identity = target_connection.identity()
+        source_backend = ChromaBackend()
         palace = PalaceRef(id="g3b-snapshot", local_path=str(args.source_snapshot.resolve()))
         source = source_backend.get_collection(
             palace=palace, collection_name=args.collection, create=False
         )
-        target = target_backend.get_collection(
-            palace=palace,
-            collection_name=args.collection,
-            create=False,
-            options={"embedding_dim": args.expected_dimension},
+        target = PgVectorCollection(
+            target_connection,
+            args.collection,
+            embedding_dim=args.expected_dimension,
         )
         if args.target_model == "minilm":
 
@@ -264,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         result: dict = {
             "mode": "execute" if args.execute else "dry-run",
+            "target": {"service": args.target_service, **target_identity},
             "source_count": report.source_count,
             "existing_ids": report.existing_ids,
             "planned_ids": report.planned_ids,
@@ -276,8 +320,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(json.dumps(result, sort_keys=True))
     finally:
-        source_backend.close()
-        target_backend.close()
+        if source_backend is not None:
+            source_backend.close()
+        target_connection.close()
     return 0
 
 

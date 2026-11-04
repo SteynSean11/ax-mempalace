@@ -6,7 +6,53 @@ import pytest
 
 from mempalace.backends.base import GetResult
 from mempalace.backends.pgvector import PgVectorCollection
-from mempalace.g3b_copier import canonical_hash, copy_drawers, copy_kg_snapshot
+from mempalace.g3b_copier import (
+    _PgServiceConnection,
+    canonical_hash,
+    copy_drawers,
+    copy_kg_snapshot,
+    main,
+)
+
+
+def test_cli_refuses_implicit_postgres_target(monkeypatch, capsys):
+    monkeypatch.setenv("PGHOST", "127.0.0.1")
+    monkeypatch.setenv("PGDATABASE", "omega")
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "--source-snapshot",
+                "/unused",
+                "--target-model",
+                "nomic",
+                "--expected-dimension",
+                "768",
+            ]
+        )
+    assert error.value.code == 2
+    assert "--target-service" in capsys.readouterr().err
+
+
+def test_service_identity_reports_only_allowlisted_fields():
+    class Connection:
+        closed = False
+
+        def get_dsn_parameters(self):
+            return {
+                "host": "scratch.local",
+                "port": "15432",
+                "dbname": "scratch",
+                "password": "redacted",
+            }
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    service = _PgServiceConnection("g3b-scratch", connect=lambda *, service: connection)
+    assert service.identity() == {"host": "scratch.local", "port": "15432", "database": "scratch"}
+    service.close()
+    assert connection.closed
 
 
 class FakeCollection:
