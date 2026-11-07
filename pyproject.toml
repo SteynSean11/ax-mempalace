@@ -32,7 +32,9 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "requests>=2.31",
     "huggingface-hub>=2.4.0",
-    "onnxruntime>=1.24.3",
+    # onnxruntime 1.24+ ships no cp310 wheel, so the floor stays at 1.23:
+    # Python 3.10 resolves to 1.23.2 and Python 3.11+ to the newest release.
+    "onnxruntime>=1.23",
     "tokenizers>=0.23.3",
 ]
 
