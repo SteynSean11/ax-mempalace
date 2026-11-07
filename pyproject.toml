@@ -38,6 +38,15 @@ dependencies = [
     "tokenizers>=0.23.3",
 ]
 
+[tool.uv]
+# onnxruntime 1.24.0 and later publish no cp310 wheel, and they publish no
+# sdist either, so a lock that resolves them for Python 3.10 cannot be
+# installed on 3.10 at all. The package metadata still claims
+# `requires-python >=3.10`, so a universal lock picks 1.24.3 for the
+# `python_full_version < '3.11'` fork. This constraint pins that fork to the
+# newest release that actually ships a cp310 wheel.
+constraint-dependencies = ["onnxruntime<1.24; python_full_version < '3.11'"]
+
 [project.urls]
 Homepage = "https://github.com/MemPalace/mempalace"
 Repository = "https://github.com/MemPalace/mempalace"
