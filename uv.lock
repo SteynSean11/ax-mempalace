@@ -2151,9 +2151,13 @@ version = "3.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
+    { name = "huggingface-hub" },
+    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.31.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "psycopg2-binary" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "tokenizers" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
@@ -2196,6 +2200,8 @@ requires-dist = [
     { name = "autocorrect", marker = "extra == 'spellcheck'", specifier = ">=2.0" },
     { name = "chromadb", specifier = ">=1.5.4,<2" },
     { name = "fastmcp", marker = "python_full_version >= '3.10' and extra == 'http'", specifier = ">=2.0" },
+    { name = "huggingface-hub", specifier = ">=2.4.0" },
+    { name = "onnxruntime", specifier = ">=1.24.3" },
     { name = "onnxruntime", marker = "extra == 'coreml'", specifier = ">=1.16" },
     { name = "onnxruntime-directml", marker = "extra == 'dml'", specifier = ">=1.16" },
     { name = "onnxruntime-gpu", marker = "extra == 'gpu'", specifier = ">=1.16" },
@@ -2206,6 +2212,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "tokenizers", specifier = ">=0.23.3" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
 ]
 provides-extras = ["dev", "spellcheck", "gpu", "dml", "coreml", "http"]

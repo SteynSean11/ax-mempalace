@@ -264,6 +264,112 @@ class MempalaceConfig:
         return str(self._file_config.get("embedding_device", "auto")).strip().lower()
 
     @property
+    def embedding_provider(self):
+        """Which embedder the pgvector backend uses.
+
+        Values: ``"nomic"`` (default) or ``"ollama"``. Read from env
+        ``MEMPALACE_EMBEDDING_PROVIDER`` first, then ``embedding_provider``
+        in ``config.json``, then ``"nomic"``.
+
+        D6 (RUNBOOK-INFRA-700-001) fixes the in-process nomic ONNX model as
+        the embedder. ``"ollama"`` is the legacy HTTP path and has to be
+        opted into explicitly — there is no Ollama service on the VPS.
+        """
+        env_val = os.environ.get("MEMPALACE_EMBEDDING_PROVIDER")
+        if env_val:
+            return env_val.strip().lower()
+        return str(self._file_config.get("embedding_provider", "nomic")).strip().lower()
+
+    @property
+    def nomic_model_dir(self):
+        """Pre-provisioned directory holding the pinned nomic model files.
+
+        Read from env ``MEMPALACE_NOMIC_MODEL_DIR`` first, then
+        ``nomic_model_dir`` in ``config.json``. Empty means "resolve the
+        pinned revision from the local Hugging Face cache".
+        """
+        env_val = os.environ.get("MEMPALACE_NOMIC_MODEL_DIR")
+        if env_val:
+            return env_val.strip()
+        value = self._file_config.get("nomic_model_dir")
+        return str(value).strip() if value else ""
+
+    @property
+    def nomic_model_file(self):
+        """Which nomic ONNX file to load.
+
+        Read from env ``MEMPALACE_NOMIC_MODEL_FILE`` first, then
+        ``nomic_model_file`` in ``config.json``, then ``onnx/model.onnx``
+        (fp32). ``onnx/model_quantized.onnx`` is the opt-in variant.
+        """
+        env_val = os.environ.get("MEMPALACE_NOMIC_MODEL_FILE")
+        if env_val:
+            return env_val.strip()
+        value = str(self._file_config.get("nomic_model_file", "onnx/model.onnx")).strip()
+        return value or "onnx/model.onnx"
+
+    @property
+    def nomic_max_length(self):
+        """Token cap for the nomic embedder.
+
+        Read from env ``MEMPALACE_NOMIC_MAX_LENGTH`` first, then
+        ``nomic_max_length`` in ``config.json``, then ``2048``. The model
+        accepts 8192 tokens, but D6 requires the memory footprint to be
+        measured at G3, so the default is deliberately conservative.
+        """
+        env_val = os.environ.get("MEMPALACE_NOMIC_MAX_LENGTH")
+        if env_val:
+            try:
+                parsed = int(env_val)
+                if parsed > 0:
+                    return parsed
+            except ValueError:
+                pass
+        cfg_val = self._file_config.get("nomic_max_length")
+        try:
+            parsed = int(cfg_val) if cfg_val is not None else 2048
+        except (TypeError, ValueError):
+            parsed = 2048
+        return parsed if parsed > 0 else 2048
+
+    @property
+    def nomic_batch_size(self):
+        """How many sequences the nomic embedder encodes per ONNX run.
+
+        Read from env ``MEMPALACE_NOMIC_BATCH_SIZE`` first, then
+        ``nomic_batch_size`` in ``config.json``, then ``8``.
+        """
+        env_val = os.environ.get("MEMPALACE_NOMIC_BATCH_SIZE")
+        if env_val:
+            try:
+                parsed = int(env_val)
+                if parsed > 0:
+                    return parsed
+            except ValueError:
+                pass
+        cfg_val = self._file_config.get("nomic_batch_size")
+        try:
+            parsed = int(cfg_val) if cfg_val is not None else 8
+        except (TypeError, ValueError):
+            parsed = 8
+        return parsed if parsed > 0 else 8
+
+    @property
+    def nomic_allow_download(self):
+        """Whether the nomic embedder may download the pinned revision.
+
+        Read from env ``MEMPALACE_NOMIC_ALLOW_DOWNLOAD`` first, then
+        ``nomic_allow_download`` in ``config.json``, then ``False``.
+
+        The default is ``False``: the VPS receives the model through
+        Ansible at G4 and must never fetch model bytes at runtime.
+        """
+        env_val = os.environ.get("MEMPALACE_NOMIC_ALLOW_DOWNLOAD")
+        if env_val:
+            return env_val.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(self._file_config.get("nomic_allow_download", False))
+
+    @property
     def topic_tunnel_min_count(self):
         """Minimum number of overlapping confirmed topics required to create
         a cross-wing tunnel between two wings.

@@ -31,6 +31,9 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "psycopg2-binary>=2.9",
     "requests>=2.31",
+    "huggingface-hub>=2.4.0",
+    "onnxruntime>=1.24.3",
+    "tokenizers>=0.23.3",
 ]
 
 [project.urls]
