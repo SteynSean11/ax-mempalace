@@ -44,6 +44,75 @@ def test_embedding_device_env_overrides_config(tmp_path, monkeypatch):
     assert cfg.embedding_device == "coreml"
 
 
+def test_nomic_settings_default_to_the_d6_layout(tmp_path, monkeypatch):
+    for name in (
+        "MEMPALACE_EMBEDDING_PROVIDER",
+        "MEMPALACE_NOMIC_MODEL_DIR",
+        "MEMPALACE_NOMIC_MODEL_FILE",
+        "MEMPALACE_NOMIC_MAX_LENGTH",
+        "MEMPALACE_NOMIC_BATCH_SIZE",
+        "MEMPALACE_NOMIC_ALLOW_DOWNLOAD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.embedding_provider == "nomic"
+    assert cfg.nomic_model_dir == ""
+    assert cfg.nomic_model_file == "onnx/model.onnx"
+    assert cfg.nomic_max_length == 2048
+    assert cfg.nomic_batch_size == 8
+    assert cfg.nomic_allow_download is False
+
+
+def test_nomic_settings_read_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMPALACE_EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setenv("MEMPALACE_NOMIC_MODEL_DIR", "/opt/nomic")
+    monkeypatch.setenv("MEMPALACE_NOMIC_MODEL_FILE", "onnx/model_quantized.onnx")
+    monkeypatch.setenv("MEMPALACE_NOMIC_MAX_LENGTH", "512")
+    monkeypatch.setenv("MEMPALACE_NOMIC_BATCH_SIZE", "4")
+    monkeypatch.setenv("MEMPALACE_NOMIC_ALLOW_DOWNLOAD", "1")
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.embedding_provider == "ollama"
+    assert cfg.nomic_model_dir == "/opt/nomic"
+    assert cfg.nomic_model_file == "onnx/model_quantized.onnx"
+    assert cfg.nomic_max_length == 512
+    assert cfg.nomic_batch_size == 4
+    assert cfg.nomic_allow_download is True
+
+
+def test_nomic_settings_read_from_the_config_file(tmp_path):
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump(
+            {
+                "embedding_provider": "nomic",
+                "nomic_model_dir": "/opt/nomic",
+                "nomic_model_file": "onnx/model_quantized.onnx",
+                "nomic_max_length": 1024,
+                "nomic_batch_size": 2,
+                "nomic_allow_download": True,
+            },
+            f,
+        )
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.embedding_provider == "nomic"
+    assert cfg.nomic_model_dir == "/opt/nomic"
+    assert cfg.nomic_model_file == "onnx/model_quantized.onnx"
+    assert cfg.nomic_max_length == 1024
+    assert cfg.nomic_batch_size == 2
+    assert cfg.nomic_allow_download is True
+
+
+def test_nomic_bounds_fall_back_when_the_value_is_nonsense(tmp_path):
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump({"nomic_max_length": "not a number", "nomic_batch_size": 0}, f)
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.nomic_max_length == 2048
+    assert cfg.nomic_batch_size == 8
+
+
 def test_env_override():
     raw = "/env/palace"
     os.environ["MEMPALACE_PALACE_PATH"] = raw

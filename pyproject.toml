@@ -31,7 +31,21 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "psycopg2-binary>=2.9",
     "requests>=2.31",
+    "huggingface-hub>=2.4.0",
+    # onnxruntime 1.24+ ships no cp310 wheel, so the floor stays at 1.23:
+    # Python 3.10 resolves to 1.23.2 and Python 3.11+ to the newest release.
+    "onnxruntime>=1.23",
+    "tokenizers>=0.23.3",
 ]
+
+[tool.uv]
+# onnxruntime 1.24.0 and later publish no cp310 wheel, and they publish no
+# sdist either, so a lock that resolves them for Python 3.10 cannot be
+# installed on 3.10 at all. The package metadata still claims
+# `requires-python >=3.10`, so a universal lock picks 1.24.3 for the
+# `python_full_version < '3.11'` fork. This constraint pins that fork to the
+# newest release that actually ships a cp310 wheel.
+constraint-dependencies = ["onnxruntime<1.24; python_full_version < '3.11'"]
 
 [project.urls]
 Homepage = "https://github.com/MemPalace/mempalace"

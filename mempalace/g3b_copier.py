@@ -261,6 +261,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-service", required=True, help="explicit libpq service name")
     parser.add_argument("--expected-dimension", type=int, required=True)
     parser.add_argument("--page-size", type=int, default=100)
+    parser.add_argument(
+        "--nomic-model-dir",
+        type=Path,
+        help=(
+            "pre-provisioned directory holding the pinned nomic model files "
+            "(overrides MEMPALACE_NOMIC_MODEL_DIR)"
+        ),
+    )
+    parser.add_argument(
+        "--allow-model-download",
+        action="store_true",
+        help="permit a one-off download of the pinned nomic revision (off by default)",
+    )
     parser.add_argument("--kg-source", type=Path)
     parser.add_argument("--kg-target", type=Path)
     parser.add_argument("--execute", action="store_true")
@@ -273,11 +286,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from .backends.base import PalaceRef
     from .backends.chroma import ChromaBackend
-    from .backends.pgvector import PgVectorCollection, _ollama_embed
+    from .backends.pgvector import PgVectorCollection
     from .embedding import get_embedding_function
 
     target_connection = _PgServiceConnection(args.target_service)
     source_backend = None
+    embedder_identity: dict = {}
     try:
         target_identity = target_connection.identity()
         source_backend = ChromaBackend()
@@ -295,8 +309,22 @@ def main(argv: list[str] | None = None) -> int:
             def embed(documents: list[str]) -> list[list[float]]:
                 embedding_function = get_embedding_function("cpu")
                 return [list(vector) for vector in embedding_function(documents)]
+
+            embedder_identity = {"model": "all-MiniLM-L6-v2", "dimension": 384}
         else:
-            embed = _ollama_embed
+            # D6: nomic runs in-process through ONNX Runtime. There is no
+            # Ollama service on the VPS and no hosted embedding API.
+            from .nomic_embedder import get_nomic_embedder
+
+            embedder = get_nomic_embedder(
+                model_dir=str(args.nomic_model_dir) if args.nomic_model_dir else None,
+                allow_download=True if args.allow_model_download else None,
+            )
+            embedder_identity = embedder.describe()
+
+            def embed(documents: list[str]) -> list[list[float]]:
+                return embedder.embed_documents(documents)
+
         report = copy_drawers(
             source,
             target,
@@ -313,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
             "planned_ids": report.planned_ids,
             "copied_ids": report.copied_ids,
             "sampled_hashes": report.sampled_hashes,
+            "embedder": embedder_identity,
         }
         if args.kg_source and args.kg_target:
             result["kg_counts"] = copy_kg_snapshot(

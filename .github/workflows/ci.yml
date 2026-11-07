@@ -48,6 +48,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
+      # The test jobs above install with pip, which never reads uv.lock. That
+      # leaves the lockfile's own installability unverified: a lock that
+      # resolves a package to a release with no wheel for the running
+      # interpreter passes every test job and still cannot be installed.
+      #
+      # This step closes that gap on the OLDEST supported interpreter, which
+      # is where a wheel-availability regression shows up: `uv sync --locked`
+      # fails when pyproject and uv.lock disagree, and it fails when the
+      # locked set cannot be installed for the target interpreter.
+      - name: Install the locked dependency set
+        if: matrix.python-version == '3.10'
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --locked --group dev --python 3.10
+      - name: Import the locked runtime dependencies
+        if: matrix.python-version == '3.10'
+        run: |
+          uv run --no-sync --python 3.10 python -c "\
+          import onnxruntime, tokenizers, huggingface_hub; \
+          print(onnxruntime.__version__, tokenizers.__version__, huggingface_hub.__version__)"
       - run: pip install -e ".[dev]"
       - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80 --durations=10
 

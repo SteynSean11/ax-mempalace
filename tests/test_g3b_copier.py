@@ -1,7 +1,9 @@
 """Synthetic, offline checks for the G3b drawer copier."""
 
+import json
 import sqlite3
 
+import psycopg2.sql
 import pytest
 
 from mempalace.backends.base import GetResult
@@ -179,6 +181,89 @@ def test_kg_copy_uses_synthetic_snapshot_and_refuses_existing_target(tmp_path):
         copy_kg_snapshot(source, target, execute=True)
 
 
+def _statement_text(statement) -> str:
+    """Render a psycopg2 composed statement to plain SQL for assertions.
+
+    ``psycopg2.sql.Identifier.as_string`` needs a live connection, so the
+    identifier is quoted here with the same rule psycopg2 uses.
+    """
+    if isinstance(statement, str):
+        return statement
+    rendered = []
+    for part in statement._wrapped:
+        if isinstance(part, psycopg2.sql.Identifier):
+            rendered.append('"{}"'.format(part._wrapped[0].replace('"', '""')))
+        else:
+            rendered.append(part.as_string(None))
+    return "".join(rendered)
+
+
+def test_nomic_target_model_uses_the_in_process_embedder(monkeypatch, capsys):
+    """``--target-model nomic`` must embed through the in-process ONNX model."""
+    embedded: list[str] = []
+
+    class FakeEmbedder:
+        def describe(self):
+            return {"model_id": "nomic-ai/nomic-embed-text-v1.5", "dimension": 768}
+
+        def embed_documents(self, documents):
+            embedded.extend(documents)
+            return [[0.0] * 768 for _ in documents]
+
+    def forbidden_ollama(_texts):
+        raise AssertionError("the Ollama path must not be used for --target-model nomic")
+
+    monkeypatch.setattr(
+        "mempalace.nomic_embedder.get_nomic_embedder", lambda **kwargs: FakeEmbedder()
+    )
+    monkeypatch.setattr("mempalace.backends.pgvector._ollama_embed", forbidden_ollama)
+
+    source = FakeCollection(_rows())
+
+    class FakeSourceBackend:
+        def get_collection(self, **_kwargs):
+            return source
+
+        def close(self):
+            pass
+
+    class FakeService:
+        def __init__(self, service, connect=None):
+            self.service = service
+
+        def identity(self):
+            return {"host": "scratch", "port": "15432", "database": "scratch"}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("mempalace.backends.chroma.ChromaBackend", FakeSourceBackend)
+    monkeypatch.setattr(
+        "mempalace.backends.pgvector.PgVectorCollection",
+        lambda *_args, **_kwargs: FakeCollection({}),
+    )
+    monkeypatch.setattr("mempalace.g3b_copier._PgServiceConnection", FakeService)
+
+    exit_code = main(
+        [
+            "--source-snapshot",
+            "/unused",
+            "--target-model",
+            "nomic",
+            "--target-service",
+            "scratch",
+            "--expected-dimension",
+            "768",
+            "--execute",
+        ]
+    )
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["embedder"]["model_id"] == "nomic-ai/nomic-embed-text-v1.5"
+    assert report["copied_ids"] == ["a", "b", "c"]
+    assert embedded == ["verbatim A", "verbatim B", "verbatim C"]
+
+
 def test_pgvector_migration_writer_preserves_timestamp_and_rejects_collision():
     class Cursor:
         rowcount = 1
@@ -222,7 +307,9 @@ def test_pgvector_migration_writer_preserves_timestamp_and_rejects_collision():
         created_at=["2026-01-01T00:00:00Z"],
     )
     sql, params = conn.cursor_instance.calls[0]
-    assert "created_at" in sql and "ON CONFLICT (id) DO NOTHING" in sql
+    statement = _statement_text(sql)
+    assert "created_at" in statement and "ON CONFLICT (id) DO NOTHING" in statement
+    assert '"mempalace_drawers"' in statement
     assert params[-2:] == ("[1.0,2.0,3.0]", "2026-01-01T00:00:00Z")
     assert conn.commits == 1
 
