@@ -36,3 +36,7 @@ venv/
 
 # ChromaDB local data
 *.sqlite3-journal
+
+# T-WORKSPACE-100: per-track WIP (worktrees, local notes) stays out of git
+trax/*/worktrees/
+trax/*/wip/
