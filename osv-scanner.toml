@@ -90,6 +90,11 @@ ignoreUntil = 2027-04-30
 reason = "filelock SoftFileLock evicts a fresh lock file whose watched age is anomalous. Fixed in 4.2.1, which requires Python >= 3.11; the newest 3.10-compatible release (4.1.0) is vulnerable. The vulnerable pin exists in uv.lock only under the python_full_version < '3.11' marker. Cleared by dropping Python 3.10 support."
 
 [[IgnoredVulns]]
+id = "GHSA-vvf4-9x63-8xvv"
+ignoreUntil = 2027-04-30
+reason = "dnspython (CVSS 7.5). Fixed in 2.9.2, which uv.lock now pins for every Python >= 3.11. The newest 3.10-compatible release (2.8.0) has no fix; that pin exists in uv.lock only under the python_full_version < '3.11' marker, so a default install on Python >= 3.11 never resolves it. Same rationale as GHSA-45c3-73f7-pv4m. Cleared by dropping Python 3.10 support."
+
+[[IgnoredVulns]]
 id = "GHSA-567q-5qvw-pf92"
 ignoreUntil = 2027-04-30
 reason = "filelock Windows oplock on a soft lock's marker. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
