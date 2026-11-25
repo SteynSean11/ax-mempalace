@@ -174,3 +174,18 @@ baseline that could not be closed in the C4 port.
 `beta` matches the other four ApexSigma repositories and is where the
 ApexSigma-side work lands. Upstream's `main`/`develop` workflows are left
 running untouched.
+
+## Python 3.12 floor (2026-11-25)
+
+`requires-python` moved from `>=3.10` to `>=3.12` (owner decision). That removed the `python_full_version < '3.11'` branch of `uv.lock`, which pinned vulnerable dnspython 2.8.0 and filelock 4.1.0. The 18 OSV ignores that existed only for that branch were deleted, and dnspython moved to 2.9.2 (GHSA-vvf4-9x63-8xvv).
+
+CI changes:
+- The test matrix is now `["3.12", "3.13"]`.
+- The locked-install check runs on 3.12, the oldest supported version.
+- `lint` runs on 3.12.
+
+The `[tool.uv]` constraint for onnxruntime's missing cp310 wheel and the `tomli` backport dependency are gone. `mempalace/project_scanner.py` keeps its `tomli` fallback import, which is dead code on 3.12, to keep the upstream diff small.
+
+Branch protection must list `test-linux (3.12)` and `test-linux (3.13)` instead of `(3.10)`, `(3.11)` and `(3.13)`.
+
+The earlier sections above describe the 3.9 → 3.10 history and are kept as a record.

@@ -5,46 +5,23 @@
 # advisory fails the scan again and must be re-reviewed, not silently renewed.
 #
 # ---------------------------------------------------------------------------
-# Why this file exists
+# History
 # ---------------------------------------------------------------------------
 # The C4 baseline port added the OSV dependency scan to this fork. The fork's
-# uv.lock had drifted well behind upstream and carried 103 advisories. The
-# lockfile refresh in this PR cleared 77 of them (103 -> 26).
+# uv.lock had drifted well behind upstream and carried 103 advisories; a
+# lockfile refresh cleared 77 of them. Of the remaining 26:
 #
-# The 26 that remain fall into exactly two groups, and NEITHER can be fixed
-# by a lockfile change while this repository supports Python >= 3.10.
-#
-# ---------------------------------------------------------------------------
-# GROUP 1 -- reachable only through the `python_full_version < '3.11'`
-#             marker (23 advisories)
-# ---------------------------------------------------------------------------
-# The patched releases of these two packages require Python >= 3.11:
-#
-#   dnspython  2.9.0   (fixes GHSA-45c3-73f7-pv4m)   requires-python >=3.11
-#   filelock   4.2.1   (fixes 15 advisories)          requires-python >=3.11
-#
-# The newest releases that still support Python 3.10 are dnspython 2.8.0 and
-# filelock 4.1.0, and both are vulnerable. The resolver therefore keeps the
-# vulnerable pins in the lockfile under a `python_full_version < '3.11'`
-# marker while picking the clean versions for Python >= 3.11:
-#
-#   email-validator  -> dnspython 2.8.0  [python_full_version <  '3.11']
-#                   -> dnspython 2.9.1  [python_full_version >= '3.11']
-#   huggingface-hub  -> filelock   4.1.0  [python_full_version <  '3.11']
-#                   -> filelock   4.2.4  [python_full_version >= '3.11']
-#
-# OSV-Scanner scans the lockfile, not the interpreter, so it reports the
-# Python-3.10 branch even though a default installation on Python >= 3.11
-# never resolves it.
-#
-# These 23 are cleared the moment this repository drops Python 3.10
-# (requires-python >= 3.11). That is a separate decision from the C4 CI
-# baseline port and is recorded as a known gap in
-# .github/workflows/README-fork-notes.md. Until then they are time-boxed
-# below.
+#   - 18 were reachable only through the `python_full_version < '3.11'`
+#     marker (dnspython 2.8.0 and filelock 4.1.0, the newest releases that
+#     still support Python 3.10; every patched release needs >= 3.11). They
+#     were cleared on 2026-11-25 by raising requires-python to >= 3.12, which
+#     removes that marker branch from uv.lock. Their ignores were deleted in
+#     the same change, so a regression fails the scan.
+#   - 8 records (4 advisories, each listed under its PYSEC and its GHSA id)
+#     have no fixed release at any version. They remain below.
 #
 # ---------------------------------------------------------------------------
-# GROUP 2 -- no fixed release exists at any version (4 advisories)
+# No fixed release exists at any version (4 advisories, 8 ids)
 # ---------------------------------------------------------------------------
 # chromadb 1.5.9 is the newest release on PyPI, and the OSV records for
 # these four advisories carry an EMPTY `fixed` list. There is no version to
@@ -67,107 +44,15 @@
 # Chroma server; the code-injection advisories require an attacker-supplied
 # document to reach a vulnerable parse path.
 #
-# These four are therefore tracked as upstream debt against chromadb, to be
-# re-reviewed on chromadb's next release, and they carry the SAME expiry as
-# the rest so that they cannot silently persist.
+# These are tracked as upstream debt against chromadb, to be re-reviewed on
+# chromadb's next release.
 #
 # ---------------------------------------------------------------------------
 # Re-review
 # ---------------------------------------------------------------------------
 # The expiry is 2027-04-30. Before that date, re-check whether chromadb has
-# published a fix, and whether this repository has dropped Python 3.10. If
-# either has happened, remove the corresponding entries here -- the scan
-# must fail again rather than pass on a stale exception.
-
-[[IgnoredVulns]]
-id = "GHSA-45c3-73f7-pv4m"
-ignoreUntil = 2027-04-30
-reason = "dnspython dns.name.from_wire_parser() excessive CPU use. Fixed in 2.9.0, which requires Python >= 3.11; the newest 3.10-compatible release (2.8.0) is vulnerable. The vulnerable pin exists in uv.lock only under the python_full_version < '3.11' marker, so a default install on Python >= 3.11 never resolves it. Cleared by dropping Python 3.10 support."
-
-[[IgnoredVulns]]
-id = "GHSA-2g95-wg33-c5x2"
-ignoreUntil = 2027-04-30
-reason = "filelock SoftFileLock evicts a fresh lock file whose watched age is anomalous. Fixed in 4.2.1, which requires Python >= 3.11; the newest 3.10-compatible release (4.1.0) is vulnerable. The vulnerable pin exists in uv.lock only under the python_full_version < '3.11' marker. Cleared by dropping Python 3.10 support."
-
-[[IgnoredVulns]]
-id = "GHSA-567q-5qvw-pf92"
-ignoreUntil = 2027-04-30
-reason = "filelock Windows oplock on a soft lock's marker. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-6627-m3xw-93mp"
-ignoreUntil = 2027-04-30
-reason = "filelock StrictSoftFileLock creates its claim directories without the intended permission. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-69hj-f68j-2879"
-ignoreUntil = 2027-04-30
-reason = "filelock UnixFileLock truncates and chmods any regular file another user controls. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-8mx5-7m5m-r77g"
-ignoreUntil = 2027-04-30
-reason = "filelock WindowsFileLock ignores mode. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-9c4x-gm8v-wgc4"
-ignoreUntil = 2027-04-30
-reason = "filelock StrictSoftFileLock and SoftReadWriteLock adopt a protocol directory. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-9j6q-wvj5-jgjg"
-ignoreUntil = 2027-04-30
-reason = "filelock symlink swap during SoftFileLock's writability check. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-9vhv-jxww-xfm5"
-ignoreUntil = 2027-04-30
-reason = "filelock ReadWriteLock on Windows acts on SQLite side files. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-crv4-6mhj-j5jh"
-ignoreUntil = 2027-04-30
-reason = "filelock SoftFileLock stale-break restore follows a swapped-in symlink. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-cwqr-hh33-gh44"
-ignoreUntil = 2027-04-30
-reason = "filelock ReadWriteLock: a crafted lock database makes every acquire stall. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-fj95-fr6c-h845"
-ignoreUntil = 2027-04-30
-reason = "filelock SoftReadWriteLock holder refresh writes through a hard link. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-fq56-3cx3-fjxp"
-ignoreUntil = 2027-04-30
-reason = "filelock SoftFileLock stale-lock break removes a live lock file. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-jqc4-5cvw-7w85"
-ignoreUntil = 2027-04-30
-reason = "filelock ReadWriteLock on the hard-link route deletes a directory. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-m462-7rxw-wvpg"
-ignoreUntil = 2027-04-30
-reason = "filelock StrictSoftFileLock follows a symbolic link swapped in at the wrong moment. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-rfpc-qcw5-3pc4"
-ignoreUntil = 2027-04-30
-reason = "filelock SoftFileLock removes a live holder's marker when another user races it. Fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-v4x8-3wr5-3wq8"
-ignoreUntil = 2027-04-30
-reason = "filelock advisory fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
-
-[[IgnoredVulns]]
-id = "GHSA-wfhq-q4j2-c37m"
-ignoreUntil = 2027-04-30
-reason = "filelock advisory fixed in 4.2.1, which requires Python >= 3.11. See the group note above."
+# published a fix. If it has, remove the corresponding entries here -- the
+# scan must fail again rather than pass on a stale exception.
 
 [[IgnoredVulns]]
 id = "PYSEC-2026-311"
